@@ -372,6 +372,51 @@ const leadsPage = (function () {
   };
 
   // ─────────────────────────────────────────────
+  // TOASTS (lightweight, no dependency)
+  // ─────────────────────────────────────────────
+  function addToastStyles() {
+    if (document.getElementById("toast-styles")) return;
+    const s = document.createElement('style');
+    s.id = 'toast-styles';
+    s.textContent = `
+      .toast-container { position: fixed; top: 16px; right: 16px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; }
+      .toast { min-width: 260px; max-width: 360px; padding: 12px 14px; border-radius: 10px; color: #0f172a; background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 10px 30px rgba(0,0,0,0.08); font-size: 0.9rem; display: flex; align-items: center; gap: 10px; opacity: 0; transform: translateY(-8px); animation: toastIn 200ms ease forwards; }
+      .toast-success { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+      .toast-error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+      .toast-info { border-color: #c7d2fe; background: #eff6ff; color: #1e40af; }
+      @keyframes toastIn { to { opacity: 1; transform: translateY(0); } }
+      @keyframes toastOut { to { opacity: 0; transform: translateY(-8px); } }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function ensureToastContainer() {
+    let c = document.getElementById('toast-container');
+    if (!c) {
+      c = document.createElement('div');
+      c.id = 'toast-container';
+      c.className = 'toast-container';
+      document.body.appendChild(c);
+    }
+    return c;
+  }
+
+  function showToast(message, type = 'success', duration = 2500) {
+    addToastStyles();
+    const container = ensureToastContainer();
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = message;
+    container.appendChild(el);
+    const hide = () => {
+      el.style.animation = 'toastOut 180ms ease forwards';
+      setTimeout(() => el.remove(), 200);
+    };
+    setTimeout(hide, duration);
+    return { hide };
+  }
+
+  // ─────────────────────────────────────────────
   // HELPERS
   // ─────────────────────────────────────────────
   function escapeHtml(str) {
@@ -399,6 +444,14 @@ const leadsPage = (function () {
     expandedRows.clear();
     selectedLeads.clear();
     await loadPage(1);
+  }
+
+  // After creating a lead, the upstream may take seconds to reflect it.
+  // Poll a few times to surface the new data sooner.
+  function schedulePostCreateSync() {
+    // Immediate refresh already happens; also refresh at 10s and 20s
+    setTimeout(() => { refreshLeads(); }, 10000);
+    setTimeout(() => { refreshLeads(); showToast('Leads aktualisiert', 'info', 1500); }, 20000);
   }
 
   function formatNumber(num) {
@@ -1218,11 +1271,12 @@ const leadsPage = (function () {
           kategorie: data.kategorie,
         };
         await createLeadOnAPI(payload);
+        showToast('Lead wurde erstellt. Synchronisiere…', 'success', 2200);
         await refreshLeads();
+        schedulePostCreateSync();
         closePanel();
-        alert("Lead wurde erfolgreich erstellt.");
       } catch (err) {
-        alert(err.message || "Erstellen fehlgeschlagen");
+        showToast(err.message || 'Erstellen fehlgeschlagen', 'error', 2800);
       }
     });
 
