@@ -551,4 +551,6 @@ const einstellungPage = (function () {
 })();
 
 window.einstellungPage = einstellungPage;
+// Alias for English route naming
+window.settingsPage = window.einstellungPage;
 console.log('einstellung.js loaded - window.einstellungPage exists:', !!window.einstellungPage);

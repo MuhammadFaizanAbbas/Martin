@@ -415,4 +415,6 @@ const berichtePage = (function () {
 })();
 
 window.berichtePage = berichtePage;
+// Alias for English route naming
+window.reportsPage = window.berichtePage;
 console.log('berichte.js loaded - window.berichtePage exists:', !!window.berichtePage);

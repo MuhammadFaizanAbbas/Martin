@@ -941,7 +941,16 @@ const kundenPage = (function () {
 })();
 
 window.kundenPage = kundenPage;
+// <<<<<<< HEAD
 console.log(
   "kunden.js loaded - window.kundenPage exists:",
   !!window.kundenPage,
 );
+// =======
+// Alias for English route naming
+window.customersPage = window.kundenPage;
+console.log(
+  "kunden.js loaded - window.kundenPage exists:",
+  !!window.kundenPage,
+);
+// >>>>>>> 69cacef40373ddd4dbc58df1714fc2eaf16e4504
