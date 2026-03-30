@@ -510,11 +510,25 @@ const dashboardPage = (function() {
       }
     }
 
-    // All proxies failed
+    // Final attempt: direct API call (will work if the API enables CORS)
+    try {
+      console.log(`🔄 Trying direct request: ${API_URL}`);
+      const directRes = await fetch(API_URL, { headers: { 'Accept': 'application/json' }, mode: 'cors' });
+      if (!directRes.ok) throw new Error(`HTTP ${directRes.status}`);
+      const directData = await directRes.json();
+      if (!directData || directData.status !== 'success') throw new Error('Invalid response format');
+      updateDashboardWithData(directData);
+      return;
+    } catch (err) {
+      console.warn(`⚠️ Direct fetch failed:`, err.message);
+    }
+
+    // All attempts failed
     console.error('❌ All CORS proxies failed. No data loaded.');
     console.log('💡 Permanent fix: Add these headers to dashboard.php on the server:');
     console.log('   header("Access-Control-Allow-Origin: *");');
-    console.log('   header("Access-Control-Allow-Methods: GET");');
+    console.log('   header("Access-Control-Allow-Methods: GET, OPTIONS");');
+    console.log('   header("Access-Control-Allow-Headers: Content-Type");');
     console.log('   header("Content-Type: application/json");');
     showErrorMessage();
   };
