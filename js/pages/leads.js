@@ -205,11 +205,13 @@ const leadsPage = (function () {
             <button class="view-tab" data-tab="lead">Lead Info</button>
             <button class="view-tab" data-tab="roof">Dachdetails</button>
             <button class="view-tab" data-tab="notes">Notizen</button>
+            <button class="view-tab" data-tab="activity">Aktivitätszeitleiste</button>
           </div>
           <div id="viewTabContact" class="view-tab-content active"></div>
           <div id="viewTabLead" class="view-tab-content"></div>
           <div id="viewTabRoof" class="view-tab-content"></div>
           <div id="viewTabNotes" class="view-tab-content"></div>
+          <div id="viewTabActivity" class="view-tab-content"></div>
         </div>
       </div>
     </div>
@@ -398,6 +400,16 @@ const leadsPage = (function () {
         .pagination-container { flex-direction: column; align-items: center; }
         .pagination-rows-per-page { margin-left: 0; margin-top: 10px; }
       }
+
+      /* Activity timeline */
+      #viewTabActivity { padding-top: 6px; }
+      .activity-wrap { max-height: 380px; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
+      .activity-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px; }
+      .activity-text { color: #334155; font-size: 0.92rem; line-height: 1.5; }
+      .activity-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 0.82rem; color: #94a3b8; }
+      .activity-by { color: #64748b; }
+      .activity-by strong { color: #0f172a; font-weight: 600; }
+      .activity-time { color: #94a3b8; }
     `;
     document.head.appendChild(styles);
   };
@@ -611,6 +623,9 @@ const leadsPage = (function () {
   const INSERT_API_SAME   = "/api/insert_lead";
   const UPDATE_API_DIRECT = "https://goarrow.ai/test/update_lead.php";
   const UPDATE_API_SAME   = "/api/update_lead";
+  const NOTES_FETCH_SAME  = "/api/lead_notes";
+  const NOTES_INSERT_SAME = "/api/insert_lead_note";
+  const ACTIVITY_FETCH_SAME = "/api/lead_activity";
   const SAME_ORIGIN_API = "/api/leads";
 
   async function fetchViaProxy(proxyUrl) {
@@ -763,24 +778,42 @@ const leadsPage = (function () {
   // NOTES API HELPERS
   // ─────────────────────────────────────────────
   async function fetchNotesForLead(leadId) {
+    // 1) Same-origin on Vercel
     try {
       const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`, { headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list = Array.isArray(data) ? data : (data.data || data.notes || []);
-      const normalized = (list || []).map(n => ({
-        text: String(n.text || n.note || n.message || ''),
-        author: String(n.author || n.user || 'System'),
-        date: String(n.date || n.created_at || '')
-      }));
+      const normalized = (list || []).map(n => ({ text: String(n.text || n.note || n.message || ''), author: String(n.author || n.user || 'System'), date: String(n.date || n.created_at || '') }));
       notesCache.set(String(leadId), normalized);
       const idx = fullLeadsData.findIndex(l => String(l.id) === String(leadId));
       if (idx !== -1) fullLeadsData[idx].notes = normalized;
       return normalized;
     } catch (err) {
-      console.warn('Notes fetch failed:', err.message);
-      return [];
+      console.warn('Same-origin notes fetch failed, trying proxies:', err.message);
     }
+    // 2) Proxy fallback for local testing
+    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}`;
+    const proxies = [
+      `https://corsproxy.io/?${encodeURIComponent(target)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+    ];
+    for (const url of proxies) {
+      try {
+        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        const list = Array.isArray(data) ? data : (data.data || data.notes || []);
+        const normalized = (list || []).map(n => ({ text: String(n.text || n.note || n.message || ''), author: String(n.author || n.user || 'System'), date: String(n.date || n.created_at || '') }));
+        notesCache.set(String(leadId), normalized);
+        const idx = fullLeadsData.findIndex(l => String(l.id) === String(leadId));
+        if (idx !== -1) fullLeadsData[idx].notes = normalized;
+        return normalized;
+      } catch (e) {
+        console.warn('Notes proxy failed:', url, e.message);
+      }
+    }
+    return [];
   }
 
   async function createNoteForLead(leadId, text) {
@@ -797,6 +830,66 @@ const leadsPage = (function () {
     } catch (err) {
       throw new Error(`Notiz konnte nicht gespeichert werden: ${err.message}`);
     }
+  }
+
+  // ─────────────────────────────────────────────
+  // ACTIVITY API HELPERS
+  // ─────────────────────────────────────────────
+  async function fetchActivityForLead(leadId) {
+    // Normalizer tolerant to different API field names
+    const normalize = (a) => {
+      const text = a.text || a.activity || a.action || a.event || a.message || a.desc || a.description || '';
+      const by   = a.from || a.by || a.user || a.username || a.author || a.created_by || 'System';
+      let at     = a.at || a.datetime || a.timestamp || a.date_time || a.date || a.created_at || '';
+      if (!at) {
+        const d = a.activity_date || a.activityDate || a.date;
+        const t = a.activity_time || a.activityTime || a.time;
+        if (d || t) at = `${d || ''}${d && t ? ' ' : ''}${t || ''}`.trim();
+      }
+      return { text: String(text || ''), by: String(by || 'System'), at: String(at || '') };
+    };
+
+    async function tryFetch(url) {
+      const r = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      console.log('🔎 Activity raw data:', data);
+      const list = Array.isArray(data) ? data : (data.data || data.activity || data.items || []);
+      return (list || []).map(normalize);
+    }
+
+    // 1) Same-origin first with lead_id, then id
+    try {
+      let list = await tryFetch(`${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`);
+      if (!list.length) {
+        list = await tryFetch(`${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`);
+      }
+      if (list.length) return list;
+    } catch (err) {
+      console.warn('Same-origin activity fetch failed:', err.message);
+    }
+
+    // 2) Proxy fallback for local (lead_id then id)
+    const base = 'https://goarrow.ai/test/fetch_activity.php';
+    const targets = [
+      `${base}?lead_id=${encodeURIComponent(leadId)}`,
+      `${base}?id=${encodeURIComponent(leadId)}`,
+    ];
+    const proxies = (t) => [
+      `https://corsproxy.io/?${encodeURIComponent(t)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(t)}`,
+    ];
+    for (const t of targets) {
+      for (const url of proxies(t)) {
+        try {
+          const list = await tryFetch(url);
+          if (list.length) return list;
+        } catch (e) {
+          console.warn('Activity proxy failed:', url, e.message);
+        }
+      }
+    }
+    return [];
   }
 
   // ─────────────────────────────────────────────
@@ -1158,6 +1251,30 @@ const leadsPage = (function () {
           )
           .join("")
       : '<div class="empty-state">Keine Notizen vorhanden.</div>';
+
+    // Activity timeline (lazy fetch)
+    const activityEl = document.getElementById('viewTabActivity');
+    if (activityEl) {
+      activityEl.innerHTML = '<div class="empty-state loading-state">⏳ Lade Aktivitäten…</div>';
+      fetchActivityForLead(id).then(list => {
+        if (!list.length) {
+          activityEl.innerHTML = '<div class="empty-state">Keine Aktivitäten vorhanden.</div>';
+          return;
+        }
+        const cards = list.map(a => `
+          <div class="activity-card">
+            <div class="activity-text">${escapeHtml(a.text || '')}</div>
+            <div class="activity-meta">
+              <div class="activity-by">Erstellt von: <strong>${escapeHtml(a.by || 'System')}</strong></div>
+              <div class="activity-time">${escapeHtml(a.at || '—')}</div>
+            </div>
+          </div>
+        `).join('');
+        activityEl.innerHTML = `<div class="activity-wrap">${cards}</div>`;
+      }).catch(() => {
+        activityEl.innerHTML = '<div class="empty-state">Aktivitäten konnten nicht geladen werden.</div>';
+      });
+    }
 
     document.querySelectorAll(".view-tab").forEach((tab) => {
       tab.onclick = () => {
