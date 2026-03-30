@@ -8,6 +8,9 @@ const leadsPage = (function () {
   let selectedLeads = new Set();
   let currentEditId = null;
   let currentNotesId = null;
+  // Cache for fetched notes per lead id
+  // Map<leadId, Array<{text, author, date}>>
+  let notesCache = new Map();
 
   // Pagination - server-side
   let currentPage = 1;
@@ -350,9 +353,10 @@ const leadsPage = (function () {
       .side-panel-footer { display: flex; gap: 12px; justify-content: flex-end; padding: 16px 24px; border-top: 1px solid #e2e8f0; }
 
       /* ── Modals ── */
-      .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999 !important; justify-content: center; align-items: center; }
-      .modal-overlay.active { display: flex; }
-      .modal-content { background: white; border-radius: 24px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: modalFadeIn 0.2s ease; }
+      /* Scoped modals for Leads to avoid cross-page conflicts */
+      #viewModal, #notesModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 4000; justify-content: center; align-items: center; }
+      #viewModal.active, #notesModal.active { display: flex; }
+      #viewModal .modal-content, #notesModal .modal-content { background: white; border-radius: 24px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: modalFadeIn 0.2s ease; }
       @keyframes modalFadeIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
       .modal-large { width: 90%; max-width: 800px; }
       .modal-medium { width: 90%; max-width: 500px; }
@@ -754,6 +758,46 @@ const leadsPage = (function () {
     if (!tbody) return;
     tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state error-state">⚠️ ${message}</div></tr>`;
   }
+  
+  // ─────────────────────────────────────────────
+  // NOTES API HELPERS
+  // ─────────────────────────────────────────────
+  async function fetchNotesForLead(leadId) {
+    try {
+      const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.data || data.notes || []);
+      const normalized = (list || []).map(n => ({
+        text: String(n.text || n.note || n.message || ''),
+        author: String(n.author || n.user || 'System'),
+        date: String(n.date || n.created_at || '')
+      }));
+      notesCache.set(String(leadId), normalized);
+      const idx = fullLeadsData.findIndex(l => String(l.id) === String(leadId));
+      if (idx !== -1) fullLeadsData[idx].notes = normalized;
+      return normalized;
+    } catch (err) {
+      console.warn('Notes fetch failed:', err.message);
+      return [];
+    }
+  }
+
+  async function createNoteForLead(leadId, text) {
+    const body = { lead_id: leadId, note: text, text };
+    try {
+      const res = await fetch(NOTES_INSERT_SAME, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      throw new Error(`Notiz konnte nicht gespeichert werden: ${err.message}`);
+    }
+  }
 
   // ─────────────────────────────────────────────
   // FILTER DATA
@@ -1137,7 +1181,12 @@ const leadsPage = (function () {
 
   window.openNotesLead = (id) => {
     currentNotesId = id;
-    renderNotesList();
+    // Always fetch latest notes before showing
+    if (id != null) {
+      fetchNotesForLead(id).then(() => renderNotesList());
+    } else {
+      renderNotesList();
+    }
     document.getElementById("noteInput").value = "";
     document.getElementById("notesModal").classList.add("active");
   };
@@ -1163,16 +1212,18 @@ const leadsPage = (function () {
     if (!txt) return;
     const lead = fullLeadsData.find((l) => l.id == currentNotesId);
     if (!lead) return;
-    const now = new Date();
-    const pad = (n) => String(n).padStart(2, "0");
-    lead.notes = lead.notes || [];
-    lead.notes.push({
-      text: txt,
-      author: "Martin Schwaak",
-      date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
-    });
-    document.getElementById("noteInput").value = "";
-    renderNotesList();
+    createNoteForLead(currentNotesId, txt)
+      .then(async () => {
+        showToast('Notiz gespeichert. Synchronisiere…', 'success', 2200);
+        document.getElementById("noteInput").value = "";
+        await fetchNotesForLead(currentNotesId);
+        renderNotesList();
+        await refreshLeads();
+        schedulePostCreateSync();
+      })
+      .catch(err => {
+        showToast(err.message || 'Notiz speichern fehlgeschlagen', 'error', 2800);
+      });
   }
 
   window.deleteLead = (id) => {
