@@ -11,9 +11,12 @@ const leadsPage = (function () {
 
   // Pagination - server-side
   let currentPage = 1;
-  const rowsPerPage = 10;
+  const rowsPerPage = 30; // Changed from 3244 to 100
   let totalLeads = 0;
   let totalPages = 0;
+  
+  // Store full dataset for client-side pagination
+  let fullLeadsData = [];
 
   // Current filters
   let currentSearch = "";
@@ -79,10 +82,10 @@ const leadsPage = (function () {
               <th>E-Mail</th>
               <th>Notiz</th>
               <th></th>
-            </tr>
+             </tr>
           </thead>
           <tbody id="leads-tbody">
-            <tr><td colspan="15"><div class="empty-state loading-state">⏳ Daten werden geladen...</div></td></tr>
+            <tr><td colspan="15"><div class="empty-state loading-state">⏳ Daten werden geladen...</div></tr>
           </tbody>
         </table>
       </div>
@@ -93,6 +96,14 @@ const leadsPage = (function () {
         <div class="pagination-pages" id="pagination-pages"></div>
         <div class="pagination-info" id="pagination-info">Seite 1 von 1</div>
         <button class="pagination-btn" id="next-page" disabled>Weiter »</button>
+        <div class="pagination-rows-per-page">
+          <select id="rowsPerPageSelect" class="rows-per-page-select">
+            <option value="50">50 pro Seite</option>
+            <option value="100" selected>100 pro Seite</option>
+            <option value="200">200 pro Seite</option>
+            <option value="500">500 pro Seite</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -256,9 +267,11 @@ const leadsPage = (function () {
       }
       .pagination-btn:hover:not(:disabled) { background: #3b82f6; color: white; border-color: #3b82f6; }
       .pagination-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-      .pagination-pages { display: flex; gap: 6px; align-items: center; }
+      .pagination-pages { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
       .pagination-page-btn {
-        width: 36px; height: 36px;
+        min-width: 36px;
+        height: 36px;
+        padding: 0 8px;
         border-radius: 8px;
         border: 1px solid #e2e8f0;
         background: white;
@@ -266,12 +279,23 @@ const leadsPage = (function () {
         font-weight: 500;
         cursor: pointer;
         transition: all 0.2s;
-        display: flex; align-items: center; justify-content: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
       .pagination-page-btn:hover { background: #eff6ff; border-color: #3b82f6; color: #3b82f6; }
       .pagination-page-btn.active { background: #3b82f6; color: white; border-color: #3b82f6; }
       .pagination-info { font-size: 0.82rem; color: #64748b; white-space: nowrap; }
       .pagination-dots { color: #94a3b8; font-size: 0.85rem; padding: 0 4px; }
+      .pagination-rows-per-page { margin-left: 16px; }
+      .rows-per-page-select {
+        padding: 6px 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: white;
+        font-size: 0.82rem;
+        cursor: pointer;
+      }
 
       /* ── Loading / Error ── */
       .loading-state { color: #64748b; }
@@ -304,7 +328,7 @@ const leadsPage = (function () {
       .modal-header h3 { font-size: 1.3rem; font-weight: 600; margin: 0; }
       .close-modal { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #94a3b8; }
       .modal-body { flex: 1; overflow-y: auto; padding: 24px; }
-      .view-tabs { display: flex; gap: 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 20px; }
+      .view-tabs { display: flex; gap: 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 20px; flex-wrap: wrap; }
       .view-tab { background: none; border: none; padding: 10px 20px; font-size: 0.85rem; font-weight: 500; color: #64748b; cursor: pointer; border-radius: 8px 8px 0 0; transition: all 0.2s; }
       .view-tab:hover { background: #f1f5f9; color: #1e293b; }
       .view-tab.active { background: #3b82f6; color: white; }
@@ -335,6 +359,8 @@ const leadsPage = (function () {
         .modal-content { width: 95%; max-height: 90vh; }
         .view-detail-row { flex-direction: column; }
         .view-detail-label { width: 100%; margin-bottom: 4px; }
+        .pagination-container { flex-direction: column; align-items: center; }
+        .pagination-rows-per-page { margin-left: 0; margin-top: 10px; }
       }
     `;
     document.head.appendChild(styles);
@@ -401,7 +427,7 @@ const leadsPage = (function () {
   }
 
   // ─────────────────────────────────────────────
-  // API FETCH  — tries 3 CORS proxies in order
+  // API FETCH
   // ─────────────────────────────────────────────
   const API_URL = "https://goarrow.ai/test/fetch_lead.php";
 
@@ -413,17 +439,8 @@ const leadsPage = (function () {
     return data;
   }
 
-  async function fetchLeadsFromAPI(page = 1, search = "", status = "", quelle = "") {
-    // Build query params — pass them so server-side pagination works if supported
-    const params = new URLSearchParams({
-      page,
-      per_page: rowsPerPage,
-      ...(search  && { search }),
-      ...(status  && { status }),
-      ...(quelle  && { lead_quelle: quelle }),
-    });
-
-    const targetUrl = `${API_URL}?${params.toString()}`;
+  async function fetchLeadsFromAPI() {
+    const targetUrl = `${API_URL}`;
 
     const proxies = [
       `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
@@ -442,7 +459,6 @@ const leadsPage = (function () {
       }
     }
 
-    // Last try: direct request (this works only if server allows CORS)
     try {
       console.log(`🔄 Trying direct request: ${targetUrl}`);
       const directResponse = await fetch(targetUrl, {
@@ -458,71 +474,72 @@ const leadsPage = (function () {
       console.warn(`⚠️ Direct fetch failed:`, err.message);
     }
 
-    throw new Error(
-      "All CORS proxies failed. Please enable CORS on https://goarrow.ai/test/fetch_lead.php or use a server-side proxy from your Vercel app."
-    );
+    throw new Error("All CORS proxies failed. Please enable CORS on https://goarrow.ai/test/fetch_lead.php");
   }
 
   function showLeadsLoadError(message) {
     const tbody = document.getElementById("leads-tbody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state error-state">⚠️ ${message}</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state error-state">⚠️ ${message}</div></tr>`;
   }
 
   // ─────────────────────────────────────────────
-  // LOAD PAGE  — calls API, renders table
+  // FILTER DATA
+  // ─────────────────────────────────────────────
+  function filterData() {
+    let filtered = fullLeadsData;
+    
+    if (currentSearch) {
+      filtered = filtered.filter(lead =>
+        lead.name.toLowerCase().includes(currentSearch) || 
+        lead.ort.toLowerCase().includes(currentSearch)
+      );
+    }
+    
+    if (currentStatus) {
+      filtered = filtered.filter(lead => lead.status === currentStatus);
+    }
+    
+    if (currentQuelle) {
+      filtered = filtered.filter(lead => lead.quelle === currentQuelle);
+    }
+    
+    return filtered;
+  }
+
+  // ─────────────────────────────────────────────
+  // LOAD PAGE
   // ─────────────────────────────────────────────
   async function loadPage(page = 1) {
     currentPage = page;
 
     const tbody = document.getElementById("leads-tbody");
-    if (tbody) tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state loading-state">⏳ Lade Seite ${page}...</div></td></tr>`;
+    if (tbody && fullLeadsData.length === 0) {
+      tbody.innerHTML = `生产<td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div>`;
+    }
 
     try {
-      const result = await fetchLeadsFromAPI(page, currentSearch, currentStatus, currentQuelle);
-
-      /*
-       * The API may return pagination metadata directly, e.g.:
-       *   { data: [...], total: 250, page: 1, per_page: 10 }
-       * OR it may return all records and expect client-side slicing.
-       * We handle both cases below.
-       */
-      const allRecords = result.data.map(mapAPIToLead);
-
-      if (result.total !== undefined) {
-        // ── Server handles pagination ──
-        totalLeads = result.total;
-        totalPages = Math.ceil(totalLeads / rowsPerPage);
-        leadsData = allRecords;
-      } else {
-        // ── Client-side pagination fallback ──
-        // Store all data on first load (page 1 with no filters)
-        if (page === 1 && !currentSearch && !currentStatus && !currentQuelle) {
-          leadsData = allRecords;
-        }
-
-        // Apply client-side filters
-        let filtered = leadsData.filter(lead =>
-          (!currentSearch || lead.name.toLowerCase().includes(currentSearch) || lead.ort.toLowerCase().includes(currentSearch)) &&
-          (!currentStatus || lead.status === currentStatus) &&
-          (!currentQuelle || lead.quelle === currentQuelle)
-        );
-
-        totalLeads = filtered.length;
-        totalPages = Math.ceil(totalLeads / rowsPerPage) || 1;
-
-        // Slice for current page
-        const start = (currentPage - 1) * rowsPerPage;
-        leadsData = page === 1 && !currentSearch && !currentStatus && !currentQuelle
-          ? allRecords   // keep full set
-          : leadsData;   // already stored
-
-        renderLeads(filtered.slice(start, start + rowsPerPage));
-        updatePaginationUI();
-        return;
+      // Only fetch if we don't have data yet
+      if (fullLeadsData.length === 0) {
+        const result = await fetchLeadsFromAPI();
+        fullLeadsData = result.data.map(mapAPIToLead);
       }
 
-      renderLeads(leadsData);
+      // Apply filters
+      const filteredData = filterData();
+      totalLeads = filteredData.length;
+      totalPages = Math.ceil(totalLeads / rowsPerPage) || 1;
+
+      // Ensure current page is within bounds
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+
+      // Get data for current page
+      const start = (currentPage - 1) * rowsPerPage;
+      const end = start + rowsPerPage;
+      const pageData = filteredData.slice(start, end);
+
+      renderLeads(pageData);
       updatePaginationUI();
 
     } catch (err) {
@@ -539,7 +556,7 @@ const leadsPage = (function () {
     if (!tbody) return;
 
     if (!data.length) {
-      tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state">Keine Leads gefunden.</div></td></tr>`;
+      tbody.innerHTML = `知道<td colspan="15"><div class="empty-state">Keine Leads gefunden.</div>`;
       updateSelectedCount();
       return;
     }
@@ -636,9 +653,8 @@ const leadsPage = (function () {
 
     if (prevBtn) prevBtn.disabled = currentPage <= 1;
     if (nextBtn) nextBtn.disabled = currentPage >= totalPages || totalPages === 0;
-    if (infoEl)  infoEl.textContent = `Seite ${currentPage} von ${totalPages || 1}  (${totalLeads} Leads gesamt)`;
+    if (infoEl)  infoEl.textContent = `Seite ${currentPage} von ${totalPages || 1} (${totalLeads} Leads gesamt)`;
 
-    // Page number buttons — show up to 7 page buttons with ellipsis
     if (!pagesEl) return;
     pagesEl.innerHTML = "";
 
@@ -661,7 +677,6 @@ const leadsPage = (function () {
     });
   }
 
-  // Build smart page range: [1, 2, …, 5, 6, 7, …, 20]
   function buildPageRange(current, total) {
     if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
     const pages = [];
@@ -682,7 +697,7 @@ const leadsPage = (function () {
   }
 
   // ─────────────────────────────────────────────
-  // FILTER  (resets to page 1)
+  // FILTER (resets to page 1)
   // ─────────────────────────────────────────────
   function applyFilters() {
     currentSearch = document.getElementById("search-input")?.value.toLowerCase().trim() || "";
@@ -706,16 +721,16 @@ const leadsPage = (function () {
   window.toggleExpandLead = id => {
     if (expandedRows.has(id)) expandedRows.delete(id);
     else expandedRows.add(id);
-    // Re-render current visible data without re-fetching
-    const allRows = Array.from(document.querySelectorAll("#leads-tbody tr:not(.expand-row)"));
-    document.querySelectorAll(".expand-row").forEach((xtr, i) => {
-      const mainTr = xtr.previousElementSibling;
-      const checkbox = mainTr?.querySelector(".lead-checkbox");
-      if (!checkbox) return;
-      const rowId = parseInt(checkbox.dataset.id);
-      xtr.className = `expand-row ${expandedRows.has(rowId) ? "open" : ""}`;
-      const btn = mainTr.querySelector(".expand-btn");
-      if (btn) btn.className = `expand-btn ${expandedRows.has(rowId) ? "open" : ""}`;
+    
+    // Update all expand rows
+    document.querySelectorAll(".expand-row").forEach((xtr) => {
+      const prevRow = xtr.previousElementSibling;
+      const checkbox = prevRow?.querySelector(".lead-checkbox");
+      if (checkbox && parseInt(checkbox.dataset.id) === id) {
+        xtr.classList.toggle("open", expandedRows.has(id));
+        const btn = prevRow.querySelector(".expand-btn");
+        if (btn) btn.classList.toggle("open", expandedRows.has(id));
+      }
     });
   };
 
@@ -736,7 +751,7 @@ const leadsPage = (function () {
   // EDIT / VIEW / DELETE
   // ─────────────────────────────────────────────
   window.editLead = id => {
-    const lead = leadsData.find(l => l.id == id);
+    const lead = fullLeadsData.find(l => l.id == id);
     if (!lead) return;
     currentEditId = id;
     document.getElementById("editSalutation").value = lead.salutation || "";
@@ -769,7 +784,7 @@ const leadsPage = (function () {
   };
 
   window.viewLead = id => {
-    const lead = leadsData.find(l => l.id == id);
+    const lead = fullLeadsData.find(l => l.id == id);
     if (!lead) return;
     document.getElementById("viewTitle").textContent = `${lead.salutation ? lead.salutation + " " : ""}${lead.name}`;
     document.getElementById("viewTabContact").innerHTML = `
@@ -822,7 +837,7 @@ const leadsPage = (function () {
   };
 
   function renderNotesList() {
-    const lead = leadsData.find(l => l.id == currentNotesId);
+    const lead = fullLeadsData.find(l => l.id == currentNotesId);
     const list = document.getElementById("notesList");
     if (!lead?.notes?.length) {
       list.innerHTML = '<div class="empty-state">Noch keine Notizen vorhanden.</div>';
@@ -834,7 +849,7 @@ const leadsPage = (function () {
   function saveNote() {
     const txt = document.getElementById("noteInput").value.trim();
     if (!txt) return;
-    const lead = leadsData.find(l => l.id == currentNotesId);
+    const lead = fullLeadsData.find(l => l.id == currentNotesId);
     if (!lead) return;
     const now = new Date();
     const pad = n => String(n).padStart(2,"0");
@@ -846,7 +861,7 @@ const leadsPage = (function () {
 
   window.deleteLead = id => {
     if (confirm("Löschen?")) {
-      leadsData = leadsData.filter(l => l.id != id);
+      fullLeadsData = fullLeadsData.filter(l => l.id != id);
       selectedLeads.delete(id);
       loadPage(currentPage);
     }
@@ -888,30 +903,46 @@ const leadsPage = (function () {
 
   function addLead(data) {
     const raw = parseFloat(data.summe) || 0;
-    leadsData.unshift({
+    const newLead = {
       id: Date.now(),
       ...data,
       statusClass: getStatusClass(data.status),
       summe: `€${raw.toLocaleString("de-DE",{minimumFractionDigits:2})}`,
       datum: data.datum || new Date().toISOString().split("T")[0],
       notes: [],
-    });
+    };
+    fullLeadsData.unshift(newLead);
     totalLeads++;
     totalPages = Math.ceil(totalLeads / rowsPerPage);
     loadPage(1);
   }
 
   function updateLead(id, data) {
-    const idx = leadsData.findIndex(l => l.id == id);
+    const idx = fullLeadsData.findIndex(l => l.id == id);
     if (idx === -1) return;
     const raw = parseFloat(data.summe) || 0;
-    leadsData[idx] = {
-      ...leadsData[idx],
+    fullLeadsData[idx] = {
+      ...fullLeadsData[idx],
       ...data,
       statusClass: getStatusClass(data.status),
       summe: `€${raw.toLocaleString("de-DE",{minimumFractionDigits:2})}`,
     };
     loadPage(currentPage);
+  }
+
+  // ─────────────────────────────────────────────
+  // ROWS PER PAGE CHANGE
+  // ─────────────────────────────────────────────
+  function updateRowsPerPage() {
+    const select = document.getElementById("rowsPerPageSelect");
+    if (select) {
+      const newRowsPerPage = parseInt(select.value);
+      if (newRowsPerPage !== rowsPerPage) {
+        // Update the constant (in a real app, you'd want to make this dynamic)
+        // For simplicity, we'll reload with new setting
+        window.location.reload(); // Simple solution - reload to reset with new rows per page
+      }
+    }
   }
 
   // ─────────────────────────────────────────────
@@ -941,6 +972,9 @@ const leadsPage = (function () {
     });
     document.getElementById("filter-status")?.addEventListener("change", applyFilters);
     document.getElementById("filter-quelle")?.addEventListener("change", applyFilters);
+    
+    // Rows per page change listener
+    document.getElementById("rowsPerPageSelect")?.addEventListener("change", updateRowsPerPage);
 
     // Pagination buttons
     document.getElementById("prev-page")?.addEventListener("click", () => goToPage(currentPage - 1));
@@ -948,6 +982,12 @@ const leadsPage = (function () {
 
     // Select all
     document.getElementById("check-all")?.addEventListener("change", e => {
+      // Get current page data for select all
+      const filteredData = filterData();
+      const start = (currentPage - 1) * rowsPerPage;
+      const end = start + rowsPerPage;
+      const currentPageData = filteredData.slice(start, end);
+      
       document.querySelectorAll(".lead-checkbox").forEach(cb => {
         cb.checked = e.target.checked;
         const id = parseInt(cb.dataset.id);

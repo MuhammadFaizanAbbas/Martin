@@ -487,14 +487,15 @@ const dashboardPage = (function() {
   };
 
   // Main fetch function — tries multiple CORS proxies in order
-  const fetchDashboardData = async () => {
-    const API_URL = 'https://goarrow.ai/test/dashboard.php';
+const fetchDashboardData = async () => {
+  const API_URL = 'https://goarrow.ai/test/dashboard.php';
 
-    const proxies = [
-      `https://corsproxy.io/?${encodeURIComponent(API_URL)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(API_URL)}`,
-      `https://cors-anywhere.herokuapp.com/${API_URL}`,
-    ];
+ const proxies = [
+    `https://corsproxy.io/?${encodeURIComponent(API_URL)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(API_URL)}`,
+    `https://cors-anywhere.herokuapp.com/${API_URL}`,
+  ];
+  
 
     console.log('🚀 Fetching data from API:', API_URL);
 
