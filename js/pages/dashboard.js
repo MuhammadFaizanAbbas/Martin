@@ -530,9 +530,9 @@ const dashboardPage = (function() {
     addDashboardStyles();
 
     // HIDE the main page header
-    if (titleEl) {
-      titleEl.style.display = 'none';
-      console.log('🔒 Main page header hidden');
+      if (titleEl) {
+      titleEl.innerHTML = `<h1>Dashboard</h1><p>Verfolgen Sie die Leistung Ihres Dachbeschichtungsunternehmens</p>`;
+      titleEl.style.display = 'block';
     }
 
     if (contentArea) {

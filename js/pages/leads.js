@@ -442,7 +442,31 @@ const leadsPage = (function () {
       }
     }
 
-    throw new Error("All CORS proxies failed");
+    // Last try: direct request (this works only if server allows CORS)
+    try {
+      console.log(`🔄 Trying direct request: ${targetUrl}`);
+      const directResponse = await fetch(targetUrl, {
+        headers: { Accept: "application/json" },
+        mode: "cors",
+      });
+      if (!directResponse.ok) throw new Error(`HTTP ${directResponse.status}`);
+      const directData = await directResponse.json();
+      if (!directData || !Array.isArray(directData.data)) throw new Error("Invalid response format");
+      console.log("✅ Direct request success");
+      return directData;
+    } catch (err) {
+      console.warn(`⚠️ Direct fetch failed:`, err.message);
+    }
+
+    throw new Error(
+      "All CORS proxies failed. Please enable CORS on https://goarrow.ai/test/fetch_lead.php or use a server-side proxy from your Vercel app."
+    );
+  }
+
+  function showLeadsLoadError(message) {
+    const tbody = document.getElementById("leads-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state error-state">⚠️ ${message}</div></td></tr>`;
   }
 
   // ─────────────────────────────────────────────
@@ -503,8 +527,7 @@ const leadsPage = (function () {
 
     } catch (err) {
       console.error("❌ Failed to load leads:", err);
-      const tbody = document.getElementById("leads-tbody");
-      if (tbody) tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state">⚠️ Daten konnten nicht geladen werden.<br><small>${err.message}</small></div></td></tr>`;
+      showLeadsLoadError(`Daten konnten nicht geladen werden. ${err.message}`);
     }
   }
 
