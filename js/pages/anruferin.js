@@ -168,6 +168,21 @@ const anruferinPage = (function () {
               <option value="Answered">Beantwortet</option>
               <option value="Unanswered">Unanswered</option>
               <option value="Redirected">Redirected</option>
+              <option value="Abgesagt">Abgesagt</option>
+              <option value="gesagt">1x gesagt tot</option>
+              <option value="Beauftragt">Beauftragt</option>
+              <option value="Unknown">EA beauftragt</option>
+              <option value="Unknown">NT beauftragt</option>
+              <option value="Unknown">In Bearbeitung</option>
+              <option value="Unknown">in Bearbeitung - angebot</option>
+              <option value="Unknown">in Bearbeitung - Preischatzung</option>
+              <option value="Unknown">follow up</option>
+              <option value="Unknown">Infos eingeholt</option>
+              <option value="Unknown">Falscher Kunde</option>
+              <option value="Unknown">Storno</option>
+              <option value="Unknown">Ghoster</option>
+              <option value="Unknown">Offen</option>
+
             </select>
             <button id="refreshBtn" class="refresh-btn">🔄 Aktualisieren</button>
           </div>

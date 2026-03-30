@@ -11,7 +11,7 @@ const leadsPage = (function () {
 
   // Pagination - server-side
   let currentPage = 1;
-  const rowsPerPage = 30; // Changed from 3244 to 100
+  const rowsPerPage = 30; 
   let totalLeads = 0;
   let totalPages = 0;
   
@@ -515,7 +515,7 @@ const leadsPage = (function () {
 
     const tbody = document.getElementById("leads-tbody");
     if (tbody && fullLeadsData.length === 0) {
-      tbody.innerHTML = `生产<td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div>`;
+      tbody.innerHTML = `<td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div>`;
     }
 
     try {
