@@ -389,6 +389,18 @@ const leadsPage = (function () {
     );
   }
 
+  // ─────────────────────────────────────────────
+  // REFRESH (force re-fetch from API)
+  // ─────────────────────────────────────────────
+  async function refreshLeads() {
+    const tbody = document.getElementById("leads-tbody");
+    if (tbody) tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div></td></tr>`;
+    fullLeadsData = [];
+    expandedRows.clear();
+    selectedLeads.clear();
+    await loadPage(1);
+  }
+
   function formatNumber(num) {
     if (!num || num === "0.00") return "0,00";
     return parseFloat(num).toLocaleString("de-DE", {
@@ -466,6 +478,8 @@ const leadsPage = (function () {
   // API FETCH
   // ─────────────────────────────────────────────
   const EXTERNAL_API_URL = "https://goarrow.ai/test/fetch_lead.php";
+  const INSERT_API_DIRECT = "https://goarrow.ai/test/insert_lead.php";
+  const INSERT_API_SAME   = "/api/insert_lead";
   const SAME_ORIGIN_API = "/api/leads";
 
   async function fetchViaProxy(proxyUrl) {
@@ -537,6 +551,42 @@ const leadsPage = (function () {
     throw new Error(
       "All CORS proxies failed. Please enable CORS on https://goarrow.ai/test/fetch_lead.php or use the same-origin API.",
     );
+  }
+
+  async function createLeadOnAPI(payload) {
+    // 1) Same-origin (Vercel)
+    try {
+      const res = await fetch(INSERT_API_SAME, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data && (data.status === "success" || data.success === true)) return data;
+      // If unknown shape but exists, still return it
+      if (data) return data;
+      throw new Error("Invalid response format");
+    } catch (err) {
+      console.warn("Create via same-origin failed, trying direct (may hit CORS locally)", err.message);
+    }
+
+    // 2) Direct to external (will likely be blocked by CORS in browser locally)
+    try {
+      const params = new URLSearchParams();
+      Object.entries(payload).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
+      const res = await fetch(INSERT_API_DIRECT, {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+        mode: "cors",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      try { return JSON.parse(text); } catch { return { status: "success", raw: text }; }
+    } catch (err) {
+      throw new Error(`Lead konnte nicht erstellt werden: ${err.message}`);
+    }
   }
 
   function showLeadsLoadError(message) {
@@ -1129,17 +1179,54 @@ const leadsPage = (function () {
       ?.addEventListener("click", closePanel);
 
     // Form submit
-    document.getElementById("editForm")?.addEventListener("submit", (e) => {
+    document.getElementById("editForm")?.addEventListener("submit", async e => {
       e.preventDefault();
       const data = collectForm();
-      if (!data.name) {
-        alert("Bitte Name eingeben");
+      if (!data.name) { alert("Bitte Name eingeben"); return; }
+      if (currentEditId) {
+        updateLead(currentEditId, data);
+        closePanel();
         return;
       }
-      if (currentEditId) updateLead(currentEditId, data);
-      else addLead(data);
-      closePanel();
+      try {
+        const payload = {
+          salutation: data.salutation,
+          name: data.name,
+          erstberatung_telefon: data.briefberatungTelefon,
+          strasse_objekt: data.strasseObjekt,
+          angebot: data.angebot,
+          plz: data.plz,
+          ort: data.ort,
+          telefon: data.telefon,
+          email: data.email,
+          status: data.status,
+          einschaetzung_kunde: data.qualification,
+          lead_quelle: data.quelle,
+          kontakt_via: data.kontaktVia,
+          datum: data.datum,
+          nachfassen: data.nachfassen,
+          bearbeiter: data.bearbeiter,
+          summe_netto: data.summe,
+          dachflaeche_m2: data.dachflaeche,
+          dachneigung_grad: data.dachneigung,
+          dacheindeckung: data.dacheindeckung,
+          wunsch_farbe: data.farbe,
+          dachpfanne: data.dachpfanne,
+          baujahr_dach: data.baujahr,
+          zusaetzliche_extras: data.zusatzExtras,
+          sale_typ: data.salesTyp,
+          kategorie: data.kategorie,
+        };
+        await createLeadOnAPI(payload);
+        await refreshLeads();
+        closePanel();
+        alert("Lead wurde erfolgreich erstellt.");
+      } catch (err) {
+        alert(err.message || "Erstellen fehlgeschlagen");
+      }
     });
+
+    // No manual refresh button; list auto-refreshes after create
 
     // View modal
     document
