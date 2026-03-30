@@ -3,14 +3,17 @@ const kundenPage = (function () {
   let titleEl = null;
 
   // ── API URLs ──────────────────────────────────────────────────────────────
-  const API_LEADS_URL = "https://goarrow.ai/test/fetch_all_leads.php";
-  const API_DASHBOARD_URL = "https://goarrow.ai/test/dashboard.php";
+  // Prefer same-origin Vercel API routes; fall back to direct + public proxies locally
+  const SO_LEADS = "/api/leads";
+  const SO_DASHBOARD = "/api/dashboard";
+  const REMOTE_LEADS_URL = "https://goarrow.ai/test/fetch_all_leads.php";
+  const REMOTE_DASHBOARD_URL = "https://goarrow.ai/test/dashboard.php";
 
   // CORS proxies (fallback)
-  const PROXY_LEADS_URL = `https://corsproxy.io/?${encodeURIComponent(API_LEADS_URL)}`;
-  const PROXY_DASHBOARD_URL = `https://corsproxy.io/?${encodeURIComponent(API_DASHBOARD_URL)}`;
-  const ALT_PROXY_LEADS_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(API_LEADS_URL)}`;
-  const ALT_PROXY_DASHBOARD_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(API_DASHBOARD_URL)}`;
+  const PROXY_LEADS_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_LEADS_URL)}`;
+  const PROXY_DASHBOARD_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_DASHBOARD_URL)}`;
+  const ALT_PROXY_LEADS_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(REMOTE_LEADS_URL)}`;
+  const ALT_PROXY_DASHBOARD_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(REMOTE_DASHBOARD_URL)}`;
 
   // ── State ──────────────────────────────────────────────────────────────────
   let leadsData = [];
@@ -43,46 +46,56 @@ const kundenPage = (function () {
   };
 
   // ── Helper: Fetch with CORS handling ──────────────────────────────────────
-  async function fetchWithCORS(url, proxyUrls) {
-    // Try direct first
+  function httpGetJson(url, controller) {
+    return fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: controller?.signal,
+    }).then(async (res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return { success: true, data };
+    });
+  }
+
+  function fetchDelayed(url, delayMs, controller) {
+    return new Promise((resolve, reject) => {
+      const start = () => {
+        httpGetJson(url, controller).then(resolve).catch(reject);
+      };
+      if (delayMs > 0) setTimeout(start, delayMs);
+      else start();
+    });
+  }
+
+  // Race primary endpoint with staggered fallbacks to reduce tail latency
+  async function fetchFirstAvailable(urlsWithDelay) {
+    const controllers = urlsWithDelay.map(() => new AbortController());
+    const promises = urlsWithDelay.map((cfg, idx) =>
+      fetchDelayed(cfg.url, cfg.delay || 0, controllers[idx])
+    );
+
     try {
-      const response = await fetch(url, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        mode: "cors",
+      const result = await Promise.any(promises);
+      // Abort remaining requests
+      controllers.forEach((c) => {
+        try { c.abort(); } catch {}
       });
-      if (response.ok) {
-        const data = await response.json();
-        return { success: true, data };
-      }
-    } catch (e) {
-      console.log(`Direct fetch failed for ${url}:`, e.message);
+      return result;
+    } catch (err) {
+      return { success: false, error: "All endpoints failed" };
     }
-
-    // Try proxies
-    for (const proxyUrl of proxyUrls) {
-      try {
-        console.log(`Trying proxy: ${proxyUrl}`);
-        const response = await fetch(proxyUrl, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-        });
-        if (response.ok) {
-          const data = await response.json();
-          return { success: true, data };
-        }
-      } catch (e) {
-        console.log(`Proxy failed: ${proxyUrl}`, e.message);
-      }
-    }
-
-    return { success: false, error: "All fetch attempts failed" };
   }
 
   // ── Fetch leads from API ──────────────────────────────────────────────────
   async function fetchLeads() {
-    const proxyUrls = [PROXY_LEADS_URL, ALT_PROXY_LEADS_URL];
-    const result = await fetchWithCORS(API_LEADS_URL, proxyUrls);
+    const result = await fetchFirstAvailable([
+      { url: SO_LEADS, delay: 0 },
+      { url: REMOTE_LEADS_URL, delay: 700 },
+      { url: PROXY_LEADS_URL, delay: 1100 },
+      { url: ALT_PROXY_LEADS_URL, delay: 1400 },
+    ]);
 
     if (!result.success || !result.data || result.data.status !== "success") {
       console.error("Failed to fetch leads:", result.error);
@@ -123,8 +136,12 @@ const kundenPage = (function () {
 
   // ── Fetch dashboard stats from API ────────────────────────────────────────
   async function fetchDashboardStats() {
-    const proxyUrls = [PROXY_DASHBOARD_URL, ALT_PROXY_DASHBOARD_URL];
-    const result = await fetchWithCORS(API_DASHBOARD_URL, proxyUrls);
+    const result = await fetchFirstAvailable([
+      { url: SO_DASHBOARD, delay: 0 },
+      { url: REMOTE_DASHBOARD_URL, delay: 700 },
+      { url: PROXY_DASHBOARD_URL, delay: 1100 },
+      { url: ALT_PROXY_DASHBOARD_URL, delay: 1400 },
+    ]);
 
     if (!result.success || !result.data || result.data.status !== "success") {
       console.error("Failed to fetch dashboard stats:", result.error);
@@ -139,34 +156,35 @@ const kundenPage = (function () {
     if (isLoading) return;
     isLoading = true;
 
-    // Show loading state
     const tbody = document.getElementById("kunden-tbody");
     if (tbody) {
       tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">⏳ Daten werden geladen...</div></tr>`;
     }
 
-    try {
-      // Fetch both in parallel
-      const [leads, stats] = await Promise.all([
-        fetchLeads(),
-        fetchDashboardStats(),
-      ]);
+    // Kick off both requests without blocking UI
+    fetchLeads()
+      .then((leads) => {
+        leadsData = leads;
+        renderKunden();
+      })
+      .catch((e) => {
+        console.error("Leads load failed", e);
+        if (tbody) {
+          tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div></tr>`;
+        }
+      })
+      .finally(() => {
+        isLoading = false;
+      });
 
-      leadsData = leads;
-      dashboardStats = stats;
-
-      console.log(`Loaded ${leadsData.length} leads, stats:`, dashboardStats);
-
-      // Re-render after data is loaded
-      renderKunden();
-    } catch (error) {
-      console.error("Error loading data:", error);
-      if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Daten. Bitte Seite neu laden.</div></tr>`;
-      }
-    } finally {
-      isLoading = false;
-    }
+    fetchDashboardStats()
+      .then((stats) => {
+        dashboardStats = stats;
+        renderStats();
+      })
+      .catch((e) => {
+        console.warn("Dashboard stats load failed", e);
+      });
   }
 
   // ── Format number for display ─────────────────────────────────────────────
@@ -271,19 +289,6 @@ const kundenPage = (function () {
         </div>`;
       }
     });
-
-    // Add total leads summary
-    const totalLeads = dashboardStats.total_leads || leadsData.length;
-    const totalSumme = dashboardStats.total_summe_netto || 0;
-
-    html += `<div class="kstat-card" style="background: #f0fdf4; border-color: #22c55e;">
-      <div class="kstat-lbl">Gesamt Leads</div>
-      <div class="kstat-val">${totalLeads}</div>
-      <div class="kstat-multi-row" style="margin-top: 8px;">
-        <span>Summe Netto</span>
-        <span class="amount">€ ${formatNumber(totalSumme)}</span>
-      </div>
-    </div>`;
 
     el.innerHTML = html;
   }
@@ -941,16 +946,6 @@ const kundenPage = (function () {
 })();
 
 window.kundenPage = kundenPage;
-// <<<<<<< HEAD
-console.log(
-  "kunden.js loaded - window.kundenPage exists:",
-  !!window.kundenPage,
-);
-// =======
 // Alias for English route naming
 window.customersPage = window.kundenPage;
-console.log(
-  "kunden.js loaded - window.kundenPage exists:",
-  !!window.kundenPage,
-);
-// >>>>>>> 69cacef40373ddd4dbc58df1714fc2eaf16e4504
+console.log("kunden.js loaded - window.kundenPage exists:", !!window.kundenPage);
