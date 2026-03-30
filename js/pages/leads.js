@@ -63,6 +63,7 @@ const leadsPage = (function () {
           <option value="Facebook">Facebook</option>
           <option value="ChatGPT">ChatGPT</option>
           <option value="Instagram">Instagram</option>
+          <option value="kleinanzeigen">kleinanzeigen</option>
         </select>
         <div class="spacer"></div>
         <button class="btn-primary" id="new-lead-btn">
