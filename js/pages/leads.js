@@ -64,6 +64,18 @@ const leadsPage = (function () {
           <option value="ChatGPT">ChatGPT</option>
           <option value="Instagram">Instagram</option>
           <option value="kleinanzeigen">kleinanzeigen</option>
+          <option value="Empfehlung">Empfehlung</option>
+          <option value="Newsletter">Newsletter</option>
+          <option value="Bestandskunde">Bestandskunde</option>
+          <option value="MA Baustelle">MA Baustelle</option>
+          <option value="Empfehlungskarte">Empfehlungskarte</option>
+          <option value="Aussendienst">Aussendienst</option>
+          <option value="Platzhalter">Platzhalter</option>
+          <option value="Buswerbung">Buswerbung</option>
+          <option value="Autowerbung">Autowerbung</option>
+          <option value="bing">bing</option>
+          <option value="Flyer">Flyer</option>
+          <option value="Solar">Solar</option>
         </select>
         <div class="spacer"></div>
         <button class="btn-primary" id="new-lead-btn">
