@@ -1,9 +1,32 @@
+;(() => {
+  try {
+    if (!window.anruferinPage) {
+      console.log('[anruferin] bootstrap: registering stub module');
+      window.anruferinPage = {
+        init: function(contentEl, titleEl) {
+          if (titleEl) {
+            titleEl.innerHTML = '<h1>Anruferin</h1><p>Lade Modul…</p>';
+            titleEl.style.display = 'block';
+          }
+          if (contentEl) {
+            contentEl.innerHTML = '<div class="card"><div class="card-body">Das Anruferin‑Modul lädt…</div></div>';
+          }
+        }
+      };
+      window.callerPage = window.anruferinPage;
+      console.log('[anruferin] bootstrap: stub registered', !!window.anruferinPage);
+    }
+  } catch (e) {
+    // ignore bootstrap errors
+  }
+})();
 const anruferinPage = (function () {
   let contentArea = null;
   let titleEl = null;
 
   // ── API ──────────────────────────────────────────────────────────────────
   const DIRECT_URL = 'https://goarrow.ai/test/fetch_calls.php';
+  const SAME_ORIGIN_API = '/api/calls';
   // Fixed CORS proxy URL format
   const PROXY_URL = 'https://corsproxy.io/?' + encodeURIComponent(DIRECT_URL);
   // Alternative proxy if the above doesn't work
@@ -49,42 +72,23 @@ const anruferinPage = (function () {
     let data = null;
     let errMsg = '';
 
-    // 1️⃣ Direct GET
-    try {
-      const res = await fetch(DIRECT_URL, {
-        method:  'GET',
-        headers: { Accept: 'application/json' },
-        mode:    'cors',
-      });
-      data = await parseResponse(res);
-      setStatus('success', `✅ ${data.length} Anrufe geladen (direkt)`);
-    } catch (e1) {
-      errMsg = e1.message;
-      console.warn('Direct fetch fehlgeschlagen, versuche Proxy…', e1.message);
+    const attempts = [
+      { label: 'same-origin', fn: async () => fetch(SAME_ORIGIN_API, { headers: { Accept: 'application/json' } }) },
+      { label: 'direkt',      fn: async () => fetch(DIRECT_URL,        { headers: { Accept: 'application/json' }, mode: 'cors' }) },
+      { label: 'CORS-Proxy',  fn: async () => fetch(PROXY_URL,         { headers: { Accept: 'application/json' } }) },
+      { label: 'alternativ',  fn: async () => fetch(ALT_PROXY_URL,     { headers: { Accept: 'application/json' } }) },
+    ];
 
-      // 2️⃣ CORS Proxy fallback
+    for (const a of attempts) {
       try {
-        const res = await fetch(PROXY_URL, {
-          method:  'GET',
-          headers: { Accept: 'application/json' },
-        });
+        const res = await a.fn();
         data = await parseResponse(res);
-        setStatus('warning', `✅ ${data.length} Anrufe geladen (via CORS-Proxy). Bitte CORS-Header auf dem Server hinzufügen.`);
-      } catch (e2) {
-        console.warn('Proxy fetch fehlgeschlagen, versuche alternativen Proxy…', e2.message);
-        
-        // 3️⃣ Alternative CORS Proxy
-        try {
-          const res = await fetch(ALT_PROXY_URL, {
-            method:  'GET',
-            headers: { Accept: 'application/json' },
-          });
-          data = await parseResponse(res);
-          setStatus('warning', `✅ ${data.length} Anrufe geladen (via alternativem Proxy). Bitte CORS-Header auf dem Server hinzufügen.`);
-        } catch (e3) {
-          errMsg = e3.message;
-          console.error('Alle Proxy-Versuche fehlgeschlagen:', e3.message);
-        }
+        setStatus(a.label === 'same-origin' ? 'success' : (a.label === 'direkt' ? 'success' : 'warning'),
+          `✅ ${data.length} Anrufe geladen (${a.label})`);
+        break;
+      } catch (err) {
+        errMsg = err.message;
+        console.warn(`Fetch fehlgeschlagen (${a.label}), versuche nächsten…`, err.message);
       }
     }
 
@@ -92,11 +96,7 @@ const anruferinPage = (function () {
       calls = data;
     } else {
       calls = [];
-      if (data && data.length === 0) {
-        setStatus('warning', `⚠️ API hat leere Daten zurückgegeben.`);
-      } else {
-        setStatus('error', `❌ Fehler: ${errMsg}`);
-      }
+      setStatus('error', `❌ Fehler: ${errMsg}`);
     }
 
     showLoading(false);
@@ -473,4 +473,7 @@ const anruferinPage = (function () {
 })();
 
 window.anruferinPage = anruferinPage;
+console.log('[anruferin] full module registered', !!window.anruferinPage);
+// Alias for English route naming
+window.callerPage = window.anruferinPage;
 console.log('anruferin.js loaded');

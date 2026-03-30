@@ -10,6 +10,36 @@ const App = (function() {
     try {
       console.log(`Loading page module: ${pageName}`);
       
+      // Map common aliases to actual file/module names
+      const ALIASES = {
+        // English → German
+        'caller': 'anruferin',
+        'reports': 'berichte',
+        'customers': 'kunden',
+        'settings': 'einstellung',
+        // Allow identities
+        'anruferin': 'anruferin',
+        'berichte': 'berichte',
+        'kunden': 'kunden',
+        'einstellung': 'einstellung',
+        'leads': 'leads',
+        'dashboard': 'dashboard',
+      };
+      const resolvedName = ALIASES[pageName] || pageName;
+      
+      // If the module is already present, reuse it without reloading the script
+      const preloadCandidates = [
+        `${resolvedName}Page`,
+        `${pageName}Page`,
+      ];
+      for (const key of preloadCandidates) {
+        if (window[key] && typeof window[key].init === 'function') {
+          console.log(`Reusing preloaded module: ${key}`);
+          window[key].init(contentArea, dynamicTitleEl);
+          return;
+        }
+      }
+
       // Remove old script if exists
       const oldScript = document.getElementById('pageScript');
       if (oldScript) {
@@ -24,11 +54,11 @@ const App = (function() {
       // ========== TRY DIFFERENT PATHS ==========
       // Try multiple paths to find the correct one
       const paths = [
-        `js/pages/${pageName}.js?v=${Date.now()}`,      // Option 1: js/pages/dashboard.js
-        `./js/pages/${pageName}.js?v=${Date.now()}`,    // Option 2: ./js/pages/dashboard.js
-        `/js/pages/${pageName}.js?v=${Date.now()}`,     // Option 3: /js/pages/dashboard.js
-        `${pageName}.js?v=${Date.now()}`,               // Option 4: dashboard.js (root)
-        `pages/${pageName}.js?v=${Date.now()}`,         // Option 5: pages/dashboard.js
+        `js/pages/${resolvedName}.js?v=${Date.now()}`,      // Option 1: js/pages/<resolved>.js
+        `./js/pages/${resolvedName}.js?v=${Date.now()}`,    // Option 2: ./js/pages/<resolved>.js
+        `/js/pages/${resolvedName}.js?v=${Date.now()}`,     // Option 3: /js/pages/<resolved>.js
+        `${resolvedName}.js?v=${Date.now()}`,               // Option 4: <resolved>.js (root)
+        `pages/${resolvedName}.js?v=${Date.now()}`,         // Option 5: pages/<resolved>.js
       ];
       
       // Use first path (you can change this to test)
@@ -36,35 +66,51 @@ const App = (function() {
       console.log(`Attempting to load: ${script.src}`);
       
       script.onload = () => {
-        console.log(`✅ ${pageName}.js loaded successfully`);
-        
-        // Check if page module exists
-        const pageModule = window[`${pageName}Page`];
-        console.log(`Looking for module: ${pageName}Page`, pageModule ? 'Found' : 'Not found');
-        
-        if (pageModule && typeof pageModule.init === 'function') {
-          console.log(`Initializing ${pageName}Page module`);
-          pageModule.init(contentArea, dynamicTitleEl);
-        } else {
-          console.error(`❌ Page module ${pageName}Page not found`);
-          console.log('Available modules:', Object.keys(window).filter(k => k.endsWith('Page')));
-          
-          if (contentArea) {
-            contentArea.innerHTML = `
-              <div class="card">
-                <div class="card-body">
-                  <h3>⚠️ Fehler</h3>
-                  <p>Die Seite "${pageName}" konnte nicht geladen werden.</p>
-                  <p>Datei geladen: <strong>${script.src}</strong></p>
-                  <p>Modul "${pageName}Page" wurde nicht gefunden.</p>
-                  <hr>
-                  <p><strong>Verfügbare Module:</strong> ${Object.keys(window).filter(k => k.endsWith('Page')).join(', ') || 'keine'}</p>
-                  <p><strong>Tipp:</strong> Stellen Sie sicher dass die Datei <code>js/pages/${pageName}.js</code> das Modul <code>${pageName}Page</code> exportiert.</p>
-                </div>
-              </div>
-            `;
+        console.log(`✅ ${resolvedName}.js loaded successfully`);
+        try { console.log('Post-load window Pages:', Object.keys(window).filter(k=>k.endsWith('Page'))); } catch {}
+
+        const moduleCandidates = [
+          `${resolvedName}Page`,
+          `${pageName}Page`,
+        ];
+
+        const tryInit = (attempt = 1) => {
+          let foundKey = null;
+          for (const key of moduleCandidates) {
+            if (window[key] && typeof window[key].init === 'function') {
+              foundKey = key; break;
+            }
           }
-        }
+          if (foundKey) {
+            console.log(`Found module: ${foundKey}`);
+            window[foundKey].init(contentArea, dynamicTitleEl);
+            return;
+          }
+          if (attempt < 6) {
+            // Wait a tick in case the page registers late
+            setTimeout(() => tryInit(attempt + 1), 60);
+          } else {
+            console.error(`❌ Page module(s) ${moduleCandidates.join(', ')} not found after retries`);
+            console.log('Available modules:', Object.keys(window).filter(k => k.endsWith('Page')));
+            if (contentArea) {
+              contentArea.innerHTML = `
+                <div class="card">
+                  <div class="card-body">
+                    <h3>⚠️ Fehler</h3>
+                    <p>Die Seite "${pageName}" konnte nicht geladen werden.</p>
+                    <p>Datei geladen: <strong>${script.src}</strong></p>
+                    <p>Gesuchte Module: <strong>${moduleCandidates.join(', ')}</strong> wurden nicht gefunden.</p>
+                    <hr>
+                    <p><strong>Verfügbare Module:</strong> ${Object.keys(window).filter(k => k.endsWith('Page')).join(', ') || 'keine'}</p>
+                    <p><strong>Tipp:</strong> Nutzen Sie die Seite "${resolvedName}" oder exportieren Sie eines der erwarteten Module.</p>
+                  </div>
+                </div>
+              `;
+            }
+          }
+        };
+
+        tryInit();
       };
       
       script.onerror = (e) => {

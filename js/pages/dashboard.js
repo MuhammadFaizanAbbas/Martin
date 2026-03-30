@@ -486,9 +486,23 @@ const dashboardPage = (function() {
     return data;
   };
 
-  // Main fetch function — tries multiple CORS proxies in order
+  // Main fetch function — tries same-origin API, then multiple CORS proxies in order
 const fetchDashboardData = async () => {
-  const API_URL = 'https://goarrow.ai/test/dashboard.php';
+    const API_URL = 'https://goarrow.ai/test/dashboard.php';
+    const SAME_ORIGIN_API = '/api/dashboard';
+
+    // 0) Try same-origin Vercel Function first (works on deployed site)
+    try {
+      console.log(`🔄 Trying same-origin API: ${SAME_ORIGIN_API}`);
+      const res = await fetch(SAME_ORIGIN_API, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const sameData = await res.json();
+      if (!sameData || sameData.status !== 'success') throw new Error('Invalid response format');
+      updateDashboardWithData(sameData);
+      return;
+    } catch (e) {
+      console.warn('⚠️ Same-origin API failed, falling back to proxies...', e.message);
+    }
 
  const proxies = [
     `https://corsproxy.io/?${encodeURIComponent(API_URL)}`,

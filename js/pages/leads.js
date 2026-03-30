@@ -429,7 +429,8 @@ const leadsPage = (function () {
   // ─────────────────────────────────────────────
   // API FETCH
   // ─────────────────────────────────────────────
-  const API_URL = "https://goarrow.ai/test/fetch_lead.php";
+  const EXTERNAL_API_URL = "https://goarrow.ai/test/fetch_lead.php";
+  const SAME_ORIGIN_API = "/api/leads";
 
   async function fetchViaProxy(proxyUrl) {
     const res = await fetch(proxyUrl, { headers: { Accept: "application/json" } });
@@ -440,7 +441,20 @@ const leadsPage = (function () {
   }
 
   async function fetchLeadsFromAPI() {
-    const targetUrl = `${API_URL}`;
+    // 0) Try same-origin API first (works on Vercel)
+    try {
+      console.log(`🔄 Trying same-origin API: ${SAME_ORIGIN_API}`);
+      const res = await fetch(SAME_ORIGIN_API, { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data || !Array.isArray(data.data)) throw new Error("Invalid response format");
+      console.log("✅ Same-origin API success");
+      return data;
+    } catch (e) {
+      console.warn("⚠️ Same-origin API failed, falling back to proxies...", e.message);
+    }
+
+    const targetUrl = `${EXTERNAL_API_URL}`;
 
     const proxies = [
       `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
@@ -474,7 +488,7 @@ const leadsPage = (function () {
       console.warn(`⚠️ Direct fetch failed:`, err.message);
     }
 
-    throw new Error("All CORS proxies failed. Please enable CORS on https://goarrow.ai/test/fetch_lead.php");
+    throw new Error("All CORS proxies failed. Please enable CORS on https://goarrow.ai/test/fetch_lead.php or use the same-origin API.");
   }
 
   function showLeadsLoadError(message) {
