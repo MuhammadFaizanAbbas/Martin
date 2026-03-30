@@ -127,6 +127,7 @@ const leadsPage = (function () {
       </div>
       <div class="side-panel-body">
         <form id="editForm">
+          <div class="form-group"><label>ID</label><input type="text" id="editId" placeholder="—" readonly></div>
           <div class="form-group"><label>Salutation</label><select id="editSalutation"><option value="">Wählen...</option><option value="Herr">Herr</option><option value="Frau">Frau</option><option value="Divers">Divers</option></select></div>
           <div class="form-group"><label>Name *</label><input type="text" id="editName" placeholder="Geben Sie den Namen ein" required></div>
           <div class="form-group"><label>Briefberatung Telefon</label><select id="editBriefberatungTelefon"><option value="">Wählen...</option><option value="Ja">Ja</option><option value="Nein">Nein</option></select></div>
@@ -250,6 +251,7 @@ const leadsPage = (function () {
       .badge-bearbeitung { background: #fed7aa; color: #9a3412; }
       .tag { display: inline-block; padding: 4px 8px; background: #f1f5f9; border-radius: 12px; font-size: 0.7rem; }
       .assignee-chip { display: inline-block; padding: 4px 10px; background: #eef2ff; border-radius: 20px; font-size: 0.7rem; font-weight: 500; color: #4f46e5; }
+      .lead-id { font-size: 0.72rem; color: #94a3b8; margin-top: 2px; }
       .amount { font-weight: 600; color: #0f172a; }
       .date-cell { color: #64748b; font-size: 0.75rem; }
       .act-btn { background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 6px; color: #64748b; transition: all 0.2s; }
@@ -391,13 +393,24 @@ const leadsPage = (function () {
     const s = document.createElement('style');
     s.id = 'toast-styles';
     s.textContent = `
-      .toast-container { position: fixed; top: 16px; right: 16px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; }
-      .toast { min-width: 260px; max-width: 360px; padding: 12px 14px; border-radius: 10px; color: #0f172a; background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 10px 30px rgba(0,0,0,0.08); font-size: 0.9rem; display: flex; align-items: center; gap: 10px; opacity: 0; transform: translateY(-8px); animation: toastIn 200ms ease forwards; }
-      .toast-success { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
-      .toast-error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
-      .toast-info { border-color: #c7d2fe; background: #eff6ff; color: #1e40af; }
-      @keyframes toastIn { to { opacity: 1; transform: translateY(0); } }
-      @keyframes toastOut { to { opacity: 0; transform: translateY(-8px); } }
+      .toast-container { position: fixed; top: 16px; right: 16px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+      .toast { min-width: 280px; max-width: 380px; padding: 12px 14px; border-radius: 10px; color: #0f172a; background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 10px 30px rgba(0,0,0,0.08); font-size: 0.9rem; display: grid; grid-template-columns: 6px 1fr auto; align-items: center; gap: 12px; opacity: 0; transform: translateX(16px); animation: toastIn 200ms ease forwards; pointer-events: auto; position: relative; overflow: hidden; }
+      .toast .toast-accent { width: 6px; height: 100%; border-radius: 6px; }
+      .toast .toast-close { background: transparent; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 4px; border-radius: 6px; }
+      .toast .toast-close:hover { background: #f1f5f9; color: #475569; }
+      .toast .toast-progress { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: rgba(0,0,0,0.06); }
+      .toast .toast-progress > div { height: 100%; width: 100%; transform-origin: left center; background: #3b82f6; }
+      .toast-success { border-color: #bbf7d0; }
+      .toast-success .toast-accent { background: #22c55e; }
+      .toast-success .toast-progress > div { background: #22c55e; }
+      .toast-error { border-color: #fecaca; }
+      .toast-error .toast-accent { background: #ef4444; }
+      .toast-error .toast-progress > div { background: #ef4444; }
+      .toast-info { border-color: #c7d2fe; }
+      .toast-info .toast-accent { background: #3b82f6; }
+      .toast-info .toast-progress > div { background: #3b82f6; }
+      @keyframes toastIn { to { opacity: 1; transform: translateX(0); } }
+      @keyframes toastOut { to { opacity: 0; transform: translateX(16px); } }
     `;
     document.head.appendChild(s);
   }
@@ -418,13 +431,47 @@ const leadsPage = (function () {
     const container = ensureToastContainer();
     const el = document.createElement('div');
     el.className = `toast toast-${type}`;
-    el.textContent = message;
+    el.setAttribute('role','status');
+    el.setAttribute('aria-live','polite');
+    const accent = document.createElement('div');
+    accent.className = 'toast-accent';
+    const content = document.createElement('div');
+    content.textContent = message;
+    const close = document.createElement('button');
+    close.className = 'toast-close';
+    close.setAttribute('aria-label','Schließen');
+    close.textContent = '×';
+    const progress = document.createElement('div');
+    progress.className = 'toast-progress';
+    const bar = document.createElement('div');
+    progress.appendChild(bar);
+    el.appendChild(accent);
+    el.appendChild(content);
+    el.appendChild(close);
+    el.appendChild(progress);
     container.appendChild(el);
+
+    let start = performance.now();
+    let stopped = false;
+    const tick = (t) => {
+      const elapsed = t - start;
+      const pct = Math.max(0, 1 - elapsed / duration);
+      bar.style.transform = `scaleX(${pct})`;
+      if (!stopped && elapsed < duration) {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        hide();
+      }
+    };
     const hide = () => {
+      stopped = true;
       el.style.animation = 'toastOut 180ms ease forwards';
       setTimeout(() => el.remove(), 200);
     };
-    setTimeout(hide, duration);
+    let rafId = requestAnimationFrame(tick);
+    close.addEventListener('click', hide);
+    el.addEventListener('mouseenter', () => { stopped = true; });
+    el.addEventListener('mouseleave', () => { if (bar.style.transform) { start = performance.now() - (duration * (1 - parseFloat(bar.style.transform.replace('scaleX(','')))); stopped = false; rafId = requestAnimationFrame(tick); } });
     return { hide };
   }
 
@@ -545,6 +592,8 @@ const leadsPage = (function () {
   const EXTERNAL_API_URL = "https://goarrow.ai/test/fetch_lead.php";
   const INSERT_API_DIRECT = "https://goarrow.ai/test/insert_lead.php";
   const INSERT_API_SAME   = "/api/insert_lead";
+  const UPDATE_API_DIRECT = "https://goarrow.ai/test/update_lead.php";
+  const UPDATE_API_SAME   = "/api/update_lead";
   const SAME_ORIGIN_API = "/api/leads";
 
   async function fetchViaProxy(proxyUrl) {
@@ -654,6 +703,39 @@ const leadsPage = (function () {
     }
   }
 
+  async function updateLeadOnAPI(id, payload) {
+    const body = { id, ...payload };
+    try {
+      const res = await fetch(UPDATE_API_SAME, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data && (data.status === "success" || data.success === true)) return data;
+      if (data) return data;
+      throw new Error("Invalid response format");
+    } catch (err) {
+      console.warn("Update via same-origin failed, trying direct (may hit CORS locally)", err.message);
+    }
+    try {
+      const params = new URLSearchParams();
+      Object.entries(body).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
+      const res = await fetch(UPDATE_API_DIRECT, {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+        mode: "cors",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      try { return JSON.parse(text); } catch { return { status: "success", raw: text }; }
+    } catch (err) {
+      throw new Error(`Lead konnte nicht aktualisiert werden: ${err.message}`);
+    }
+  }
+
   function showLeadsLoadError(message) {
     const tbody = document.getElementById("leads-tbody");
     if (!tbody) return;
@@ -749,7 +831,7 @@ const leadsPage = (function () {
             <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </td>
-        <td><span class="lead-name">${escapeHtml(lead.name)}</span></td>
+        <td><span class="lead-name">${escapeHtml(lead.name)}</span><div class="lead-id">ID: ${escapeHtml(String(lead.id))}</div></td>
         <td>${escapeHtml(lead.ort)}</td>
         <td><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></td>
         <td><span class="tag">${escapeHtml(lead.quelle)}</span></td>
@@ -938,6 +1020,8 @@ const leadsPage = (function () {
     const lead = fullLeadsData.find((l) => l.id == id);
     if (!lead) return;
     currentEditId = id;
+    const idEl = document.getElementById("editId");
+    if (idEl) idEl.value = String(lead.id || "");
     document.getElementById("editSalutation").value = lead.salutation || "";
     document.getElementById("editName").value = lead.name;
     document.getElementById("editBriefberatungTelefon").value =
@@ -991,6 +1075,7 @@ const leadsPage = (function () {
       <div class="view-detail-row"><div class="view-detail-label">Kontakt Via</div><div class="view-detail-value">${escapeHtml(lead.kontaktVia || "—")}</div></div>`;
     document.getElementById("viewTabLead").innerHTML = `
       <div class="view-detail-row"><div class="view-detail-label">Status</div><div class="view-detail-value"><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></div></div>
+      <div class="view-detail-row"><div class="view-detail-label">ID</div><div class="view-detail-value">${escapeHtml(String(lead.id))}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Qualification</div><div class="view-detail-value">${escapeHtml(lead.qualification || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Lead Quelle</div><div class="view-detail-value">${escapeHtml(lead.quelle)}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Bearbeiter</div><div class="view-detail-value">${escapeHtml(lead.bearbeiter)}</div></div>
@@ -1249,8 +1334,43 @@ const leadsPage = (function () {
       const data = collectForm();
       if (!data.name) { alert("Bitte Name eingeben"); return; }
       if (currentEditId) {
-        updateLead(currentEditId, data);
-        closePanel();
+        try {
+          const payload = {
+            salutation: data.salutation,
+            name: data.name,
+            erstberatung_telefon: data.briefberatungTelefon,
+            strasse_objekt: data.strasseObjekt,
+            angebot: data.angebot,
+            plz: data.plz,
+            ort: data.ort,
+            telefon: data.telefon,
+            email: data.email,
+            status: data.status,
+            einschaetzung_kunde: data.qualification,
+            lead_quelle: data.quelle,
+            kontakt_via: data.kontaktVia,
+            datum: data.datum,
+            nachfassen: data.nachfassen,
+            bearbeiter: data.bearbeiter,
+            summe_netto: data.summe,
+            dachflaeche_m2: data.dachflaeche,
+            dachneigung_grad: data.dachneigung,
+            dacheindeckung: data.dacheindeckung,
+            wunsch_farbe: data.farbe,
+            dachpfanne: data.dachpfanne,
+            baujahr_dach: data.baujahr,
+            zusaetzliche_extras: data.zusatzExtras,
+            sale_typ: data.salesTyp,
+            kategorie: data.kategorie,
+          };
+          await updateLeadOnAPI(currentEditId, payload);
+          showToast('Lead aktualisiert. Synchronisiere…', 'success', 2200);
+          await refreshLeads();
+          schedulePostCreateSync();
+          closePanel();
+        } catch (err) {
+          showToast(err.message || 'Aktualisierung fehlgeschlagen', 'error', 2800);
+        }
         return;
       }
       try {
