@@ -43,6 +43,18 @@ const leadsPage = (function () {
           <option value="Infos eingeholt">Infos eingeholt</option>
           <option value="Beauftragung">Beauftragung</option>
           <option value="In Bearbeitung">In Bearbeitung</option>
+          <option value="Infos eingeholt">Infos eingeholt</option>
+          <option value="Beauftragung">Beauftragung</option>
+          <option value="Beauftragt">Beauftragt</option>
+          <option value="EA beauftragt">EA beauftragt</option>
+          <option value="NT beauftragt">NT beauftragt</option>
+          <option value="In Bearbeitung - Angebot">In Bearbeitung - Angebot</option>
+          <option value="In Bearbeitung - Preischätzung">In Bearbeitung - Preischätzung</option>
+          <option value="Abgesagt">Abgesagt</option>
+          <option value="1x gesagt tot">1x gesagt tot</option>
+          <option value="Falscher Kunde">Falscher Kunde</option>
+          <option value="Storno">Storno</option>
+          <option value="Ghoster">Ghoster</option>
         </select>
         <select class="select-box" id="filter-quelle">
           <option value="">Alle Quellen</option>
@@ -618,7 +630,7 @@ const leadsPage = (function () {
     if (!tbody) return;
 
     if (!data.length) {
-      tbody.innerHTML = `知道<td colspan="15"><div class="empty-state">Keine Leads gefunden.</div>`;
+      tbody.innerHTML = `<td colspan="15"><div class="empty-state">Keine Leads gefunden.</div>`;
       updateSelectedCount();
       return;
     }
