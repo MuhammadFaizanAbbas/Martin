@@ -40,8 +40,6 @@ const leadsPage = (function () {
           <option value="">Alle Status</option>
           <option value="follow up">follow up</option>
           <option value="Offen">Offen</option>
-          <option value="Infos eingeholt">Infos eingeholt</option>
-          <option value="Beauftragung">Beauftragung</option>
           <option value="In Bearbeitung">In Bearbeitung</option>
           <option value="Infos eingeholt">Infos eingeholt</option>
           <option value="Beauftragung">Beauftragung</option>
@@ -58,7 +56,6 @@ const leadsPage = (function () {
         </select>
         <select class="select-box" id="filter-quelle">
           <option value="">Alle Quellen</option>
-          <option value="Empfehlung">Empfehlung</option>
           <option value="Google">Google</option>
           <option value="Facebook">Facebook</option>
           <option value="ChatGPT">ChatGPT</option>
@@ -143,7 +140,12 @@ const leadsPage = (function () {
           <div class="form-group"><label>ID</label><input type="text" id="editId" placeholder="—" readonly></div>
           <div class="form-group"><label>Salutation</label><select id="editSalutation"><option value="">Wählen...</option><option value="Herr">Herr</option><option value="Frau">Frau</option><option value="Divers">Divers</option></select></div>
           <div class="form-group"><label>Name *</label><input type="text" id="editName" placeholder="Geben Sie den Namen ein" required></div>
-          <div class="form-group"><label>Briefberatung Telefon</label><select id="editBriefberatungTelefon"><option value="">Wählen...</option><option value="Ja">Ja</option><option value="Nein">Nein</option></select></div>
+          <div class="form-group"><label>Briefberatung Telefon</label>
+          <select id="editBriefberatungTelefon">
+          <option value="">Wählen...</option>
+          <option value="Ja">FALSCH</option>
+          <option value="Nein">WAHR</option>
+          </select></div>
           <div class="form-group"><label>Straße Objekt</label><input type="text" id="editStrasseObjekt" placeholder="Hausanschrift..."></div>
           <div class="form-group"><label>Angebot</label><input type="text" id="editAngebot" placeholder="Angebot eingeben"></div>
           <div class="form-row">
@@ -154,10 +156,62 @@ const leadsPage = (function () {
             <div class="form-group"><label>Telefon</label><input type="text" id="editTelefon" placeholder="Telefon-Nummer"></div>
             <div class="form-group"><label>E-Mail</label><input type="email" id="editEmail" placeholder="E-Mail-Adresse"></div>
           </div>
-          <div class="form-group"><label>Status</label><select id="editStatus"><option value="Offen">Offen</option><option value="follow up">follow up</option><option value="Infos eingeholt">Infos eingeholt</option><option value="Beauftragung">Beauftragung</option><option value="In Bearbeitung">In Bearbeitung</option></select></div>
-          <div class="form-group"><label>Qualification</label><select id="editQualification"><option value="">Wählen...</option><option value="Hoch">Hoch</option><option value="Mittel">Mittel</option><option value="Niedrig">Niedrig</option></select></div>
-          <div class="form-group"><label>Lead Quelle</label><input type="text" id="editQuelle" placeholder="Lead-Quelle"></div>
-          <div class="form-group"><label>Kontakt Via</label><select id="editKontaktVia"><option value="">Wählen...</option><option value="Telefon">Telefon</option><option value="E-Mail">E-Mail</option><option value="WhatsApp">WhatsApp</option><option value="Persönlich">Persönlich</option><option value="Anruf">Anruf</option><option value="Email">Email</option></select></div>
+          <div class="form-group"><label>Status</label><select id="editStatus">
+          <option value="Offen">Offen</option>
+       <option value="follow up">follow up</option>
+          <option value="In Bearbeitung">In Bearbeitung</option>
+          <option value="Infos eingeholt">Infos eingeholt</option>
+          <option value="Beauftragung">Beauftragung</option>
+          <option value="Beauftragt">Beauftragt</option>
+          <option value="EA beauftragt">EA beauftragt</option>
+          <option value="NT beauftragt">NT beauftragt</option>
+          <option value="In Bearbeitung - Angebot">In Bearbeitung - Angebot</option>
+          <option value="In Bearbeitung - Preischätzung">In Bearbeitung - Preischätzung</option>
+          <option value="Abgesagt">Abgesagt</option>
+          <option value="1x gesagt tot">1x gesagt tot</option>
+          <option value="Falscher Kunde">Falscher Kunde</option>
+          <option value="Storno">Storno</option>
+          <option value="Ghoster">Ghoster</option>
+          </select>
+          </div>
+          <div class="form-group"><label>Qualification</label>
+          <select id="editQualification">
+          <option value="">Wählen...</option>
+          <option value="Hoch">Hoch</option>
+          <option value="Mittel">Mittel</option>
+          <option value="Niedrig">Niedrig</option>
+          </select>
+          </div>
+          <div class="form-group"><label>Lead Quelle</label>
+               <select " id="editQuelle">
+          <option value="Google">Google</option>
+          <option value="Facebook">Facebook</option>
+          <option value="ChatGPT">ChatGPT</option>
+          <option value="Instagram">Instagram</option>
+          <option value="kleinanzeigen">kleinanzeigen</option>
+          <option value="Empfehlung">Empfehlung</option>
+          <option value="Newsletter">Newsletter</option>
+          <option value="Bestandskunde">Bestandskunde</option>
+          <option value="MA Baustelle">MA Baustelle</option>
+          <option value="Empfehlungskarte">Empfehlungskarte</option>
+          <option value="Aussendienst">Aussendienst</option>
+          <option value="Platzhalter">Platzhalter</option>
+          <option value="Buswerbung">Buswerbung</option>
+          <option value="Autowerbung">Autowerbung</option>
+          <option value="bing">bing</option>
+          <option value="Flyer">Flyer</option>
+          <option value="Solar">Solar</option>
+          </select>
+          </div>
+          <div class="form-group"><label>Kontakt Via</label><select id="editKontaktVia">
+          <option value="">Wählen...</option>
+          <option value="Telefon">Telefon</option>
+          <option value="E-Mail">E-Mail</option>
+          <option value="Leadformular">Leadformular</option>
+          <option value="Anruf">Anruf</option>
+
+          </select>
+          </div>
           <div class="form-row">
             <div class="form-group"><label>Datum</label><input type="date" id="editDatum"></div>
             <div class="form-group"><label>Nachfassen</label><input type="date" id="editNachfassen"></div>
@@ -168,18 +222,68 @@ const leadsPage = (function () {
             <div class="form-group"><label>Dachfläche m²</label><input type="text" id="editDachflaeche" placeholder="Dachfläche"></div>
             <div class="form-group"><label>Dachneigung Grad</label><input type="text" id="editDachneigung" placeholder="Dachneigung"></div>
           </div>
-          <div class="form-group"><label>Dacheindeckung</label><select id="editDacheindeckung"><option value="">Wählen...</option><option value="Beton">Beton</option><option value="Ziegel">Ziegel</option><option value="Schiefer">Schiefer</option><option value="Bitumen">Bitumen</option></select></div>
-          <div class="form-group"><label>Wunsch Farbe</label><select id="editFarbe"><option value="">Wählen...</option><option value="Anthrazit">Anthrazit</option><option value="Rot">Rot</option><option value="Schwarz">Schwarz</option><option value="Grau">Grau</option><option value="Ziegelrot">Ziegelrot</option><option value="Blauschwarz">Blauschwarz</option></select></div>
-          <div class="form-group"><label>Dachpfanne</label><select id="editDachpfanne"><option value="">Wählen...</option><option value="Frankfurter Pfanne">Frankfurter Pfanne</option><option value="Hannoveraner Pfanne">Hannoveraner Pfanne</option><option value="Doppel-S Pfanne">Doppel-S Pfanne</option></select></div>
-          <div class="form-group"><label>Baujahr Dach</label><select id="editBaujahr"><option value="">Wählen...</option>${Array.from(
+          <div class="form-group"><label>Dacheindeckung</label>
+          <select id="editDacheindeckung">
+          <option value="">Wählen...</option>
+          <option value="Beton">Beton</option>
+          <option value="Ton">Ton</option>
+          <option value="Metall">Metall</option>
+          <option value="Eternit">Eternit</option>
+          <option value="Engobe">Engobe</option>
+          <option value="Glasiert">Glasiert</option>
+          <option value="Asbest">Asbest</option>
+          <option value="Echt Schiefer">Echt Schiefer</option>
+          <option value="Tegalit">Tegalit</option>
+          </select>
+          </div>
+          <div class="form-group"><label>Wunsch Farbe</label>
+          <select id="editFarbe">
+          <option value="">Wählen...</option>
+          <option value="Anthrazit">Anthrazit</option>
+          <option value="Rot">Rot</option>
+          <option value="Schwarz">Schwarz</option>
+          <option value="Grau">Grau</option>
+          <option value="Ziegelrot">Ziegelrot</option>
+          <option value="Blauschwarz">Blauschwarz</option>
+          <option value="Schiefergrau">Schiefergrau</option>
+          <option value="Stahlblau">Stahlblau</option>
+          <option value="Bordeaux">Bordeaux</option>
+          <option value="Moosgrün">Moosgrün</option>
+          <option value="Oxidrot">Oxidrot</option>
+          <option value="Klassikrot">Klassikrot</option>
+          </select>
+          </div>
+          <div class="form-group"><label>Dachpfanne</label>
+          <select id="editDachpfanne">
+          <option value="">Wählen...</option>
+          <option value="Frankfurter Pfanne">Frankfurter Pfanne</option>
+          <option value="Harzer Pfanne">Harzer Pfanne</option>
+          <option value="Doppel-S Pfanne">Doppel-S Pfanne</option>
+          <option value="Taunus Pfanne">Taunus Pfanne</option>
+          <option value="Hohlpfanne">Hohlpfanne</option>
+          <option value="Doppelmuldenziegel">Doppelmuldenziegel</option>
+          <option value="Biberschwanz">Biberschwanz</option>
+          <option value="Tegalit">Tegalit</option>
+          <option value="Sonstige">Sonstige</option>
+          <option value="Unbekannt">Unbekannt</option>
+          </select>
+          </div>
+          <div class="form-group"><label>Baujahr Dach</label
+          ><select id="editBaujahr"><option value="">Wählen...</option>${Array.from(
             { length: 80 },
             (_, i) => 2024 - i,
           )
             .map((y) => `<option value="${y}">${y}</option>`)
             .join("")}</select></div>
           <div class="form-group"><label>Zusätzliche Extras</label><input type="text" id="editZusatzExtras" placeholder="Extras"></div>
-          <div class="form-group"><label>Sales Typ</label><select id="editSalesTyp"><option value="">Wählen...</option><option value="Inbound">Inbound</option><option value="Outbound">Outbound</option><option value="Empfehlung">Empfehlung</option><option value="Hoch">Hoch</option></select></div>
-          <div class="form-group"><label>Kategorie</label><input type="text" id="editKategorie" placeholder="Kategorie"></div>
+          <div class="form-group"><label>Sales Typ</label>
+          <select id="editSalesTyp">
+          <option value="">Wählen...</option>
+          <option value="Inbound">Hoch</option>
+          <option value="Outbound">Normal</option>
+        
+          </select>
+          </div>
           <div class="side-panel-footer">
             <button type="button" class="btn-secondary" id="cancelEditBtn">Abbrechen</button>
             <button type="submit" class="btn-primary">Speichern</button>
