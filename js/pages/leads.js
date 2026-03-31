@@ -21,6 +21,10 @@ const leadsPage = (function () {
   // Store full dataset for client-side pagination
   let fullLeadsData = [];
 
+  // Optimistic cache until reload
+  let pendingCreates = []; // Array of temp leads (ids are negative)
+  let pendingUpdates = new Map(); // Map<id:string, partialLead>
+
   // Current filters
   let currentSearch = "";
   let currentStatus = "";
@@ -853,6 +857,36 @@ const leadsPage = (function () {
     });
   }
 
+  // Lightweight identity to dedupe pending creates once upstream reflects them
+  function leadKey(lead) {
+    return [lead.name || '', lead.email || '', lead.telefon || '']
+      .map((s) => String(s).trim().toLowerCase())
+      .join('|');
+  }
+
+  function euro(amount) {
+    const raw = parseFloat(amount) || 0;
+    return `€ ${raw.toLocaleString('de-DE', { minimumFractionDigits: 2 })}`;
+  }
+
+  function applyPendingUpdates(list) {
+    return list.map((l) => {
+      const upd = pendingUpdates.get(String(l.id));
+      if (!upd) return l;
+      const merged = { ...l, ...upd };
+      if (upd.status) merged.statusClass = getStatusClass(upd.status);
+      if (upd.summe != null) merged.summe = euro(upd.summe);
+      return merged;
+    });
+  }
+
+  function mergeAfterFetch(baseList) {
+    const withUpdates = applyPendingUpdates(baseList);
+    const serverKeys = new Set(withUpdates.map(leadKey));
+    const creates = pendingCreates.filter((pc) => !serverKeys.has(leadKey(pc)));
+    return [...creates, ...withUpdates];
+  }
+
   function getStatusClass(status) {
     if (status === "follow up") return "badge-follow";
     if (status === "Infos eingeholt" || status === "Nur Info eingeholt")
@@ -881,8 +915,8 @@ const leadsPage = (function () {
       kategorie: apiLead.sale_typ || "—",
       summe:
         apiLead.summe_netto && apiLead.summe_netto !== "0.00"
-          ? `$ ${formatNumber(apiLead.summe_netto)}`
-          : "$ 0,00",
+          ? `€ ${formatNumber(apiLead.summe_netto)}`
+          : "€ 0,00",
       datum: apiLead.created_at
         ? apiLead.created_at.split(" ")[0]
         : apiLead.datum && apiLead.datum !== "0000-00-00"
@@ -1273,7 +1307,10 @@ const leadsPage = (function () {
       // Only fetch if we don't have data yet
       if (fullLeadsData.length === 0) {
         const result = await fetchLeadsFromAPI();
-        fullLeadsData = result.data.map(mapAPIToLead);
+        fullLeadsData = mergeAfterFetch(result.data.map(mapAPIToLead));
+      } else {
+        // Ensure dataset reflects optimistic cache as well
+        fullLeadsData = mergeAfterFetch(fullLeadsData);
       }
 
       // Apply filters
@@ -1875,6 +1912,22 @@ function closePanel() {
     loadPage(1);
   }
 
+  // Add a temporary lead so UI reflects creation instantly until reload
+  function addPendingCreate(data) {
+    const tempLead = {
+      id: -Date.now(),
+      ...data,
+      statusClass: getStatusClass(data.status),
+      summe: `€ ${(parseFloat(data.summe) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}`,
+      datum: data.datum || new Date().toISOString().split('T')[0],
+      notes: [],
+    };
+    pendingCreates.unshift(tempLead);
+    // Rebuild current view with optimistic cache
+    fullLeadsData = mergeAfterFetch(fullLeadsData);
+    loadPage(1);
+  }
+
   function updateLead(id, data) {
     const idx = fullLeadsData.findIndex((l) => l.id == id);
     if (idx === -1) return;
@@ -1885,6 +1938,8 @@ function closePanel() {
       statusClass: getStatusClass(data.status),
       summe: `€ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
     };
+    // Track as pending update until backend reflects it
+    pendingUpdates.set(String(id), data);
     loadPage(currentPage);
   }
 
@@ -2061,8 +2116,9 @@ function closePanel() {
           sale_typ: data.salesTyp,
           kategorie: data.kategorie,
         };
-        // Hide panel immediately per request
+        // Hide panel immediately and add optimistic row
         closePanel();
+        addPendingCreate(data);
         await createLeadOnAPI(payload);
         showToast('Lead wurde erstellt. Synchronisiere…', 'success', 2200);
         await refreshLeads();
