@@ -1822,35 +1822,40 @@ function closePanel() {
 
   window.sendEmailLead = () => alert("E-Mail senden");
 
+  // Safely read an input/select value by id; returns empty string if missing
+  function val(id) {
+    const el = document.getElementById(id);
+    return el ? el.value : "";
+  }
+
   function collectForm() {
     return {
-      salutation: document.getElementById("editSalutation").value,
-      name: document.getElementById("editName").value,
-      briefberatungTelefon: document.getElementById("editBriefberatungTelefon")
-        .value,
-      strasseObjekt: document.getElementById("editStrasseObjekt").value,
-      angebot: document.getElementById("editAngebot").value,
-      plz: document.getElementById("editPlz").value,
-      ort: document.getElementById("editOrt").value,
-      telefon: document.getElementById("editTelefon").value,
-      email: document.getElementById("editEmail").value,
-      status: document.getElementById("editStatus").value,
-      qualification: document.getElementById("editQualification").value,
-      quelle: document.getElementById("editQuelle").value,
-      kontaktVia: document.getElementById("editKontaktVia").value,
-      datum: document.getElementById("editDatum").value,
-      nachfassen: document.getElementById("editNachfassen").value,
-      bearbeiter: document.getElementById("editBearbeiter").value,
-      summe: document.getElementById("editSumme").value,
-      dachflaeche: document.getElementById("editDachflaeche").value,
-      dachneigung: document.getElementById("editDachneigung").value,
-      dacheindeckung: document.getElementById("editDacheindeckung").value,
-      farbe: document.getElementById("editFarbe").value,
-      dachpfanne: document.getElementById("editDachpfanne").value,
-      baujahr: document.getElementById("editBaujahr").value,
-      zusatzExtras: document.getElementById("editZusatzExtras").value,
-      salesTyp: document.getElementById("editSalesTyp").value,
-      kategorie: document.getElementById("editKategorie").value,
+      salutation: val("editSalutation"),
+      name: val("editName"),
+      briefberatungTelefon: val("editBriefberatungTelefon"),
+      strasseObjekt: val("editStrasseObjekt"),
+      angebot: val("editAngebot"),
+      plz: val("editPlz"),
+      ort: val("editOrt"),
+      telefon: val("editTelefon"),
+      email: val("editEmail"),
+      status: val("editStatus"),
+      qualification: val("editQualification"),
+      quelle: val("editQuelle"),
+      kontaktVia: val("editKontaktVia"),
+      datum: val("editDatum"),
+      nachfassen: val("editNachfassen"),
+      bearbeiter: val("editBearbeiter"),
+      summe: val("editSumme"),
+      dachflaeche: val("editDachflaeche"),
+      dachneigung: val("editDachneigung"),
+      dacheindeckung: val("editDacheindeckung"),
+      farbe: val("editFarbe"),
+      dachpfanne: val("editDachpfanne"),
+      baujahr: val("editBaujahr"),
+      zusatzExtras: val("editZusatzExtras"),
+      salesTyp: val("editSalesTyp"),
+      kategorie: val("editKategorie"),
     };
   }
 
