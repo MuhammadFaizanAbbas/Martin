@@ -359,7 +359,7 @@ const leadsPage = (function () {
         </div>
         <div class="modal-body">
           <div class="form-group">
-            <label>Dropdown</label>
+            <label>Vorlage</label>
             <select id="emailTemplateSelect" class="k-full-select">
               <option value="">Choose an E-Mail</option>
               <option value="E1">E1</option>
@@ -375,8 +375,12 @@ const leadsPage = (function () {
             </select>
           </div>
           <div class="form-group">
-            <label>Textbox</label>
+            <label>Name</label>
             <input type="text" id="emailSubjectInput" placeholder="Name" class="k-full-select">
+          </div>
+          <div class="form-group">
+            <label>E-Mail</label>
+            <input type="email" id="massEmailAddressInput" placeholder="E-Mail" class="k-full-select">
           </div>
           <div style="text-align:right; margin-top:20px;">
             <button id="sendMassEmailBtn" class="k-btn-green">E-Mail senden</button>
@@ -1484,25 +1488,45 @@ const leadsPage = (function () {
     }
   }
 
-  function openMassEmailModal() {
-    if (selectedLeads.size === 0) {
+  let currentEmailLeadId = null;
+
+  function openMassEmailModal(lead = null) {
+    // If opened for a specific lead (from row action), allow opening without selection
+    // Otherwise require selected leads
+    if (!lead && selectedLeads.size === 0) {
       showToast("Bitte wählen Sie zuerst Leads aus", "error", 2000);
       return;
     }
-    
-    // Reset form
+
+    currentEmailLeadId = lead ? lead.id : null;
+
+    // Reset / prefill form
     const selectEl = document.getElementById("emailTemplateSelect");
-    const subjectEl = document.getElementById("emailSubjectInput");
+    const nameEl = document.getElementById("emailSubjectInput");
+    const emailEl = document.getElementById("massEmailAddressInput");
     if (selectEl) selectEl.value = "";
-    if (subjectEl) subjectEl.value = "";
-    
+    if (lead) {
+      if (nameEl) nameEl.value = lead.name || "";
+      if (emailEl) emailEl.value = lead.email || "";
+    } else {
+      if (nameEl) nameEl.value = "";
+      if (emailEl) emailEl.value = "";
+      // If multiple are selected, we can prefill first one's name/email optionally
+      const first = fullLeadsData.find(l => selectedLeads.has(l.id));
+      if (first) {
+        if (nameEl && !nameEl.value) nameEl.value = first.name || "";
+        if (emailEl && !emailEl.value) emailEl.value = first.email || "";
+      }
+    }
+
     const modal = document.getElementById("massEmailModal");
     if (modal) modal.classList.add("active");
   }
 
   function sendMassEmails() {
     const selectedEmailTemplate = document.getElementById("emailTemplateSelect")?.value;
-    const subjectText = document.getElementById("emailSubjectInput")?.value;
+    const subjectText = document.getElementById("emailSubjectInput")?.value; // Name
+    const singleEmail = document.getElementById("massEmailAddressInput")?.value || "";
     
     if (!selectedEmailTemplate) {
       showToast("Bitte wählen Sie eine E-Mail-Vorlage aus", "error", 2000);
@@ -1514,9 +1538,21 @@ const leadsPage = (function () {
       return;
     }
     
-    // Get selected leads emails
-    const selectedLeadsList = fullLeadsData.filter(lead => selectedLeads.has(lead.id));
-    const leadsWithEmails = selectedLeadsList.filter(lead => lead.email && lead.email.trim() !== "");
+    let leadsWithEmails = [];
+    if (currentEmailLeadId != null) {
+      const lead = fullLeadsData.find(l => String(l.id) === String(currentEmailLeadId));
+      const name = subjectText?.trim() || lead?.name || '';
+      const email = singleEmail.trim() || lead?.email || '';
+      if (!email) {
+        showToast("Keine E-Mail-Adresse vorhanden", "error", 2000);
+        return;
+      }
+      leadsWithEmails = [{ name, email }];
+    } else {
+      // Get selected leads emails
+      const selectedLeadsList = fullLeadsData.filter(lead => selectedLeads.has(lead.id));
+      leadsWithEmails = selectedLeadsList.filter(lead => lead.email && lead.email.trim() !== "");
+    }
     
     if (leadsWithEmails.length === 0) {
       showToast("Keine der ausgewählten Leads hat eine E-Mail-Adresse", "error", 2000);
@@ -1534,7 +1570,8 @@ const leadsPage = (function () {
       console.log(`Mass email sent to ${leadsWithEmails.length} recipients`);
       console.log("Template:", selectedEmailTemplate);
       console.log("Subject:", subjectText);
-      console.log("Recipients:", leadsWithEmails.map(l => ({ name: l.name, email: l.email })));
+      const recipients = leadsWithEmails.map(l => ({ name: l.name, email: l.email }));
+      console.log("Recipients:", recipients);
       
       showToast(`✅ ${leadsWithEmails.length} E-Mails wurden gesendet`, "success", 3000);
     }, 500);
@@ -1857,7 +1894,10 @@ function closePanel() {
     }
   };
 
-  window.sendEmailLead = () => alert("E-Mail senden");
+  window.sendEmailLead = (id) => {
+    const lead = fullLeadsData.find(l => l.id == id);
+    openMassEmailModal(lead || null);
+  };
 
   // Safely read an input/select value by id; returns empty string if missing
   function val(id) {
