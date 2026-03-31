@@ -2140,6 +2140,8 @@ function closePanel() {
             zusaetzliche_extras: data.zusatzExtras,
             sale_typ: data.salesTyp,
             kategorie: data.kategorie,
+            // Some upstreams expect lead_id instead of id
+            lead_id: currentEditId,
           };
           // Hide panel immediately per request and update UI optimistically
           closePanel();

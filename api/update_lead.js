@@ -24,6 +24,26 @@ export default async function handler(req, res) {
     }
     if (body == null || typeof body !== 'object') body = {};
 
+    // Map id -> lead_id if needed
+    if (body.lead_id == null && body.id != null) {
+      body.lead_id = body.id;
+    }
+
+    // Normalize currency/amount fields expected by upstream
+    const normalizeAmount = (v) => String(v)
+      .replace(/[€$\s]/g, '')
+      .replace(/\./g, '')
+      .replace(/,/g, '.')
+      .trim();
+    if (body.summe_netto != null && body.summe_netto !== '') {
+      body.summe_netto = normalizeAmount(body.summe_netto);
+    }
+
+    if (body.lead_id == null || body.lead_id === '') {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(400).json({ status: 'error', message: 'Missing required field: lead_id' });
+    }
+
     const params = new URLSearchParams();
     Object.entries(body).forEach(([k, v]) => {
       if (v !== undefined && v !== null) params.append(k, String(v));
