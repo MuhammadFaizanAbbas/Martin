@@ -1508,15 +1508,21 @@ const leadsPage = (function () {
     if (lead) {
       if (nameEl) nameEl.value = lead.name || "";
       if (emailEl) emailEl.value = lead.email || "";
+      if (nameEl) nameEl.readOnly = true;
+      if (emailEl) emailEl.readOnly = true;
     } else {
-      if (nameEl) nameEl.value = "";
-      if (emailEl) emailEl.value = "";
-      // If multiple are selected, we can prefill first one's name/email optionally
-      const first = fullLeadsData.find(l => selectedLeads.has(l.id));
-      if (first) {
-        if (nameEl && !nameEl.value) nameEl.value = first.name || "";
-        if (emailEl && !emailEl.value) emailEl.value = first.email || "";
+      // From selection: if exactly one selected, prefill; in all cases keep read-only
+      const list = fullLeadsData.filter(l => selectedLeads.has(l.id));
+      if (list.length === 1) {
+        const only = list[0];
+        if (nameEl) nameEl.value = only.name || "";
+        if (emailEl) emailEl.value = only.email || "";
+      } else {
+        if (nameEl) nameEl.value = "";
+        if (emailEl) emailEl.value = "";
       }
+      if (nameEl) nameEl.readOnly = true;
+      if (emailEl) emailEl.readOnly = true;
     }
 
     const modal = document.getElementById("massEmailModal");
@@ -1525,7 +1531,7 @@ const leadsPage = (function () {
 
   function sendMassEmails() {
     const selectedEmailTemplate = document.getElementById("emailTemplateSelect")?.value;
-    const subjectText = document.getElementById("emailSubjectInput")?.value; // Name
+    const subjectText = document.getElementById("emailSubjectInput")?.value; // Name (single mode is read-only)
     const singleEmail = document.getElementById("massEmailAddressInput")?.value || "";
     
     if (!selectedEmailTemplate) {
@@ -1541,8 +1547,8 @@ const leadsPage = (function () {
     let leadsWithEmails = [];
     if (currentEmailLeadId != null) {
       const lead = fullLeadsData.find(l => String(l.id) === String(currentEmailLeadId));
-      const name = subjectText?.trim() || lead?.name || '';
-      const email = singleEmail.trim() || lead?.email || '';
+      const name = (lead?.name || '').trim();
+      const email = (lead?.email || '').trim();
       if (!email) {
         showToast("Keine E-Mail-Adresse vorhanden", "error", 2000);
         return;
@@ -1894,9 +1900,30 @@ function closePanel() {
     }
   };
 
-  window.sendEmailLead = (id) => {
+  window.sendEmailLead = async (id) => {
     const lead = fullLeadsData.find(l => l.id == id);
-    openMassEmailModal(lead || null);
+    if (!lead) { showToast('Lead nicht gefunden', 'error', 2000); return; }
+    const email = (lead.email || '').trim();
+    const leadName = `${lead.salutation ? lead.salutation + ' ' : ''}${lead.name || ''}`.trim();
+
+    if (!email) {
+      showToast('Keine E-Mail-Adresse vorhanden', 'error', 2200);
+      return;
+    }
+
+    const to = encodeURIComponent(email);
+    const subject = encodeURIComponent('Project Update');
+    const body = encodeURIComponent('Hi,\n\nHere is the update.\n\nRegards,');
+    const composeUrl = `https://hex2013.com/owa/?path=/mail/action/compose&to=${to}&subject=${subject}&body=${body}`;
+
+    try {
+      const activityText = `E-Mail geöffnet zu ${leadName} (${email})`;
+      await insertActivity(id, 'email', activityText);
+    } catch (e) {
+      console.warn('E-Mail Aktivität konnte nicht gespeichert werden:', e?.message || e);
+    }
+
+    window.open(composeUrl, '_blank');
   };
 
   // Safely read an input/select value by id; returns empty string if missing

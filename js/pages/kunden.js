@@ -94,14 +94,18 @@ const kundenPage = (function () {
       { url: PROXY_LEADS_URL, delay: 1100 },
       { url: ALT_PROXY_LEADS_URL, delay: 1400 },
     ]);
-
-    if (!result.success || !result.data || result.data.status !== "success") {
+    if (!result.success || !result.data) {
       console.error("Failed to fetch leads:", result.error);
       return [];
     }
 
+    // Accept multiple upstream shapes
+    const rawList = Array.isArray(result.data)
+      ? result.data
+      : (result.data.data || result.data.leads || result.data.items || []);
+
     // Transform API data to our internal format
-    return (result.data.data || []).map((apiLead) => ({
+    return (rawList || []).map((apiLead) => ({
       id: apiLead.id,
       name: apiLead.name || "—",
       salutation: apiLead.salutation || "",
@@ -141,12 +145,14 @@ const kundenPage = (function () {
       { url: ALT_PROXY_DASHBOARD_URL, delay: 1400 },
     ]);
 
-    if (!result.success || !result.data || result.data.status !== "success") {
+    if (!result.success || !result.data) {
       console.error("Failed to fetch dashboard stats:", result.error);
       return {};
     }
 
-    return result.data.data || {};
+    if (result.data.data && typeof result.data.data === 'object') return result.data.data;
+    if (typeof result.data === 'object') return result.data;
+    return {};
   }
 
   // ── Load all data ─────────────────────────────────────────────────────────
