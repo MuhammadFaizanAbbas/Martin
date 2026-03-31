@@ -144,6 +144,11 @@ const App = (function() {
     console.log(`📄 Showing page: ${page}`);
     currentPage = page;
     
+    // Update URL hash without triggering page reload
+    if (window.location.hash !== `#${page}`) {
+      window.history.replaceState(null, null, `#${page}`);
+    }
+    
     // Update sidebar active state
     if (typeof SidebarManager !== 'undefined') {
       SidebarManager.updateActiveStates(currentPage);
@@ -173,6 +178,15 @@ const App = (function() {
         }
       });
     });
+    
+    // Handle browser back/forward and manual hash changes
+    window.addEventListener('hashchange', () => {
+      const hash = window.location.hash.substring(1);
+      if (hash && hash !== currentPage) {
+        console.log(`Hash changed to: ${hash}`);
+        showPage(hash);
+      }
+    });
   }
 
   function init() {
@@ -189,7 +203,13 @@ const App = (function() {
     }
     
     bindEvents();
-    showPage('dashboard');
+    
+    // Check URL hash for initial page, default to dashboard if none
+    const hash = window.location.hash.substring(1); // Remove the '#'
+    const initialPage = hash || 'dashboard';
+    console.log(`Initial page from URL hash: ${initialPage}`);
+    
+    showPage(initialPage);
     console.log('✅ App initialized successfully');
   }
 

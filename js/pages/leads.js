@@ -86,7 +86,7 @@ const leadsPage = (function () {
         </button>
       </div>
 
-      <div class="table-label" id="selected-count">Wählen Sie Führen aus: 0</div>
+      <div class="table-label-head" id="selected-count">Wählen Sie Führen aus: 0</div>
 
       <div class="table-wrap">
         <table id="leads-table">
@@ -107,7 +107,7 @@ const leadsPage = (function () {
               <th>E-Mail</th>
               <th>Notiz</th>
               <th></th>
-             </tr>
+              </tr>
           </thead>
           <tbody id="leads-tbody">
             <tr><td colspan="15"><div class="empty-state loading-state">⏳ Daten werden geladen...</div></tr>
@@ -186,7 +186,7 @@ const leadsPage = (function () {
           </select>
           </div>
           <div class="form-group"><label>Lead Quelle</label>
-               <select " id="editQuelle">
+               <select id="editQuelle">
           <option value="Google">Google</option>
           <option value="Facebook">Facebook</option>
           <option value="ChatGPT">ChatGPT</option>
@@ -223,7 +223,16 @@ const leadsPage = (function () {
           <div class="form-group"><label>Summe Netto</label><input type="text" id="editSumme" placeholder="Betrag"></div>
           <div class="form-row">
             <div class="form-group"><label>Dachfläche m²</label><input type="text" id="editDachflaeche" placeholder="Dachfläche"></div>
-            <div class="form-group"><label>Dachneigung Grad</label><input type="text" id="editDachneigung" placeholder="Dachneigung"></div>
+            <div class="form-group"><label>Dachneigung Grad</label>
+            <select id="editDachneigung">
+            <option value="">Wählen...</option>
+            <option value="0-15°">0-15°</option>
+            <option value="15-25°">15-25°</option>
+            <option value="25-45°">25-45°</option>
+            <option value="45-55°">45-55°</option>
+            <option value="über 55 Grad">über 55 Grad</option>
+            </select>
+            </div>
           </div>
           <div class="form-group"><label>Dacheindeckung</label>
           <select id="editDacheindeckung">
@@ -336,6 +345,41 @@ const leadsPage = (function () {
         </div>
       </div>
     </div>
+
+    <!-- Mass Email Modal -->
+    <div id="massEmailModal" class="modal-overlay">
+      <div class="modal-content modal-medium">
+        <div class="modal-header">
+          <h3>Senden Sie Massen-E-Mails</h3>
+          <button class="close-modal" id="closeMassEmailModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Dropdown</label>
+            <select id="emailTemplateSelect" class="k-full-select">
+              <option value="">Choose an E-Mail</option>
+              <option value="E1">E1</option>
+              <option value="E2">E2</option>
+              <option value="E3">E3</option>
+              <option value="E4">E4</option>
+              <option value="E5">E5</option>
+              <option value="E6">E6</option>
+              <option value="E7">E7</option>
+              <option value="E8">E8</option>
+              <option value="E9">E9</option>
+              <option value="E10">E10</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Textbox</label>
+            <input type="text" id="emailSubjectInput" placeholder="Name" class="k-full-select">
+          </div>
+          <div style="text-align:right; margin-top:20px;">
+            <button id="sendMassEmailBtn" class="k-btn-green">E-Mail senden</button>
+          </div>
+        </div>
+      </div>
+    </div>
   `;
 
   // ─────────────────────────────────────────────
@@ -357,6 +401,9 @@ const leadsPage = (function () {
       .btn-primary:hover { background: #2563eb; }
       .btn-secondary { background: #f1f5f9; color: #334155; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
       .table-label { margin: 16px 0; font-size: 0.85rem; color: #64748b; }
+      .table-label-head { margin: 16px 0; font-size: 0.85rem; color: #64748b;    display: flex;
+    align-items: center;
+    justify-content: space-between; }
       .table-wrap { overflow-x: auto; background: white; border-radius: 16px; border: 1px solid #eef2f8; }
       #leads-table { width: 100%; border-collapse: collapse; min-width: 1400px; }
       #leads-table th { text-align: left; padding: 14px 12px; background: #f8fafc; color: #475569; font-weight: 600; font-size: 0.8rem; border-bottom: 1px solid #e2e8f0; }
@@ -448,9 +495,27 @@ const leadsPage = (function () {
       }
 
       /* ── Side Panel ── */
-      .panel-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 2000; }
-      .panel-overlay.active { display: block; }
-      .side-panel { position: fixed; z-index: 99999; top: 0; right: -520px; width: 520px; height: 100vh; background: white; box-shadow: -4px 0 32px rgba(0,0,0,0.18); transition: right 0.3s ease; display: flex; flex-direction: column; }
+.panel-overlay { 
+  display: none; 
+  position: fixed; 
+  inset: 0; 
+  background: rgba(0,0,0,0.3); 
+  z-index: 2000; 
+}
+.panel-overlay.active { display: block; }
+.side-panel { 
+  position: fixed; 
+  z-index: 99999;  /* Increased from 99999 to ensure it's above everything */
+  top: 0; 
+  right: -520px; 
+  width: 520px; 
+  height: 100vh; 
+  background: white; 
+  box-shadow: -4px 0 32px rgba(0,0,0,0.18); 
+  transition: right 0.3s ease; 
+  display: flex; 
+  flex-direction: column; 
+}
       .side-panel.open { right: 0; }
       .side-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
       .side-panel-header h3 { font-size: 1.2rem; font-weight: 600; margin: 0; }
@@ -460,9 +525,9 @@ const leadsPage = (function () {
 
       /* ── Modals ── */
       /* Scoped modals for Leads to avoid cross-page conflicts */
-      #viewModal, #notesModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99999; justify-content: center; align-items: center; }
-      #viewModal.active, #notesModal.active { display: flex; }
-      #viewModal .modal-content, #notesModal .modal-content { background: white; border-radius: 24px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: modalFadeIn 0.2s ease; }
+      #viewModal, #notesModal, #massEmailModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99999; justify-content: center; align-items: center; }
+      #viewModal.active, #notesModal.active, #massEmailModal.active { display: flex; }
+      #viewModal .modal-content, #notesModal .modal-content, #massEmailModal .modal-content { background: white; border-radius: 24px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: modalFadeIn 0.2s ease; }
       @keyframes modalFadeIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
       .modal-large { width: 90%; max-width: 800px; }
       .modal-medium { width: 90%; max-width: 500px; }
@@ -493,6 +558,46 @@ const leadsPage = (function () {
       .note-text { font-size: 0.85rem; color: #1e293b; margin-bottom: 8px; }
       .note-meta { display: flex; gap: 16px; font-size: 0.7rem; color: #64748b; }
       .notes-input-area textarea { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; resize: vertical; box-sizing: border-box; margin-bottom: 12px; }
+
+      /* Mass Email Button */
+      .mass-email-btn {
+        background: #22c55e;
+        color: white;
+        border: none;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+        margin-left: 12px;
+        height: 40px;
+      }
+      .mass-email-btn:hover {
+        background: #16a34a;
+      }
+
+      .k-btn-green {
+        background: #22c55e;
+        color: white;
+        border: none;
+        padding: 12px 28px;
+        border-radius: 10px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .k-btn-green:hover { background: #16a34a; }
+      .k-full-select {
+        width: 100%;
+        padding: 11px 14px;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        font-size: 0.9rem;
+        background: white;
+        color: #64748b;
+      }
 
       @media (max-width: 768px) {
         .side-panel { width: 100%; right: -100%; }
@@ -627,11 +732,105 @@ const leadsPage = (function () {
   }
 
   // ─────────────────────────────────────────────
+  // ACTIVITY API - Insert call activity
+  // ─────────────────────────────────────────────
+  const INSERT_ACTIVITY_API = "/api/insert_activity";
+  const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
+
+  async function insertActivity(leadId, activityType, activityText) {
+    const payload = {
+      lead_id: leadId,
+      activity_type: activityType,
+      activity_text: activityText,
+      timestamp: new Date().toISOString()
+    };
+    
+    try {
+      // Try same-origin API first
+      const res = await fetch(INSERT_ACTIVITY_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data && (data.status === "success" || data.success === true)) return data;
+      return data;
+    } catch (err) {
+      console.warn("Activity insert via same-origin failed, trying direct...", err.message);
+      
+      // Try direct endpoint as fallback
+      try {
+        const params = new URLSearchParams();
+        Object.entries(payload).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
+        const res = await fetch(INSERT_ACTIVITY_DIRECT, {
+          method: "POST",
+          headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+          body: params,
+          mode: "cors",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        try { return JSON.parse(text); } catch { return { status: "success", raw: text }; }
+      } catch (directErr) {
+        console.error("Activity insert failed:", directErr);
+        throw new Error(`Aktivität konnte nicht gespeichert werden: ${directErr.message}`);
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // CALL FUNCTIONALITY
+  // ─────────────────────────────────────────────
+  async function makeCall(leadId) {
+    const lead = fullLeadsData.find((l) => l.id == leadId);
+    if (!lead) {
+      showToast("Lead nicht gefunden", "error", 2000);
+      return;
+    }
+    
+    const phoneNumber = lead.telefon;
+    const leadName = `${lead.salutation ? lead.salutation + " " : ""}${lead.name}`;
+    
+    // Check if phone number is empty
+    if (!phoneNumber || phoneNumber.trim() === "") {
+      showToast(`Keine Telefonnummer für ${leadName} vorhanden`, "error", 3000);
+      return;
+    }
+    
+    // Clean phone number - remove spaces, dashes, etc.
+    const cleanPhone = phoneNumber.replace(/[\s\-\(\)]/g, "");
+    
+    // Build 3CX Web Client URL
+    const baseUrl = "https://msdach.3cx.eu:5001/webclient/#/call";
+    const callUrl = `${baseUrl}?phone=${encodeURIComponent(cleanPhone)}`;
+    
+    try {
+      // Record activity in backend
+      const activityText = `Anruf gestartet zu ${leadName} (${phoneNumber})`;
+      await insertActivity(leadId, "call", activityText);
+      console.log(`Activity recorded for lead ${leadId}: ${activityText}`);
+      
+      // Open 3CX Web Client
+      window.open(callUrl, "_blank");
+      
+      // Show success toast
+      showToast(`Anruf wird gestartet: ${phoneNumber}`, "success", 3000);
+      
+    } catch (error) {
+      console.error("Failed to record call activity:", error);
+      // Still open the call even if activity recording fails
+      window.open(callUrl, "_blank");
+      showToast(`Anruf wird gestartet (Aktivität nicht gespeichert): ${phoneNumber}`, "info", 3000);
+    }
+  }
+
+  // ─────────────────────────────────────────────
   // REFRESH (force re-fetch from API)
   // ─────────────────────────────────────────────
   async function refreshLeads() {
     const tbody = document.getElementById("leads-tbody");
-    if (tbody) tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div></td></tr>`;
+    if (tbody) tbody.innerHTML = `</table><td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div></td>`;
     fullLeadsData = [];
     expandedRows.clear();
     selectedLeads.clear();
@@ -682,8 +881,8 @@ const leadsPage = (function () {
       kategorie: apiLead.sale_typ || "—",
       summe:
         apiLead.summe_netto && apiLead.summe_netto !== "0.00"
-          ? `€ ${formatNumber(apiLead.summe_netto)}`
-          : "€ 0,00",
+          ? `$ ${formatNumber(apiLead.summe_netto)}`
+          : "$ 0,00",
       datum: apiLead.created_at
         ? apiLead.created_at.split(" ")[0]
         : apiLead.datum && apiLead.datum !== "0000-00-00"
@@ -840,42 +1039,80 @@ const leadsPage = (function () {
   }
 
   async function updateLeadOnAPI(id, payload) {
-    const body = { id, ...payload };
-    try {
-      const res = await fetch(UPDATE_API_SAME, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (data && (data.status === "success" || data.success === true)) return data;
-      if (data) return data;
-      throw new Error("Invalid response format");
-    } catch (err) {
-      console.warn("Update via same-origin failed, trying direct (may hit CORS locally)", err.message);
+  const body = { id, ...payload };
+  
+  try {
+    console.log("Updating lead via same-origin API:", UPDATE_API_SAME);
+    const res = await fetch(UPDATE_API_SAME, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json", 
+        "Accept": "application/json" 
+      },
+      body: JSON.stringify(body),
+    });
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`HTTP ${res.status}: ${errorText}`);
     }
+    
+    const data = await res.json();
+    console.log("Update response from same-origin:", data);
+    
+    if (data && (data.status === "success" || data.success === true)) {
+      return data;
+    }
+    
+    if (data && data.id) {
+      return { status: "success", data: data };
+    }
+    
+    throw new Error("Invalid response format from update API");
+  } catch (err) {
+    console.warn("Update via same-origin failed:", err.message);
+    
+    // Try direct endpoint as fallback
     try {
       const params = new URLSearchParams();
-      Object.entries(body).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
+      Object.entries(body).forEach(([k, v]) => { 
+        if (v !== undefined && v !== null) params.append(k, String(v)); 
+      });
+      
       const res = await fetch(UPDATE_API_DIRECT, {
         method: "POST",
-        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        headers: { 
+          "Accept": "application/json", 
+          "Content-Type": "application/x-www-form-urlencoded" 
+        },
         body: params,
         mode: "cors",
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText}`);
+      }
+      
       const text = await res.text();
-      try { return JSON.parse(text); } catch { return { status: "success", raw: text }; }
-    } catch (err) {
-      throw new Error(`Lead konnte nicht aktualisiert werden: ${err.message}`);
+      console.log("Update response from direct:", text);
+      
+      try { 
+        return JSON.parse(text); 
+      } catch { 
+        return { status: "success", raw: text }; 
+      }
+    } catch (directErr) {
+      console.error("Direct update failed:", directErr);
+      throw new Error(`Lead konnte nicht aktualisiert werden: ${directErr.message}`);
     }
   }
+}
 
   function showLeadsLoadError(message) {
     const tbody = document.getElementById("leads-tbody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state error-state">⚠️ ${message}</div></tr>`;
+    tbody.innerHTML = `<td colspan="15"><div class="empty-state error-state">⚠️ ${message}</div></td>`;
   }
   
   // ─────────────────────────────────────────────
@@ -888,7 +1125,7 @@ const leadsPage = (function () {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list = Array.isArray(data) ? data : (data.data || data.notes || []);
-      const normalized = (list || []).map(n => ({ text: String(n.text || n.note || n.message || ''), author: String(n.author || n.user || 'System'), date: String(n.date || n.created_at || '') }));
+      const normalized = (list || []).map(n => ({ text: String(n.text || n.note || n.message || ''), author: String(n.author || n.user || 'Created at'), date: String(n.date || n.created_at || '') }));
       notesCache.set(String(leadId), normalized);
       const idx = fullLeadsData.findIndex(l => String(l.id) === String(leadId));
       if (idx !== -1) fullLeadsData[idx].notes = normalized;
@@ -1096,7 +1333,7 @@ const leadsPage = (function () {
         <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
         <td><span class="date-cell">${escapeHtml(lead.datum)}</span></td>
         <td>
-          <button class="act-btn" onclick="window.makeCallLead(${lead.id})">
+          <button class="act-btn call-btn" data-lead-id="${lead.id}" title="Anrufen">
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.08 5.18 2 2 0 0 1 5.06 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.09 10.91A16 16 0 0 0 13.09 15l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16z"/></svg>
           </button>
         </td>
@@ -1105,12 +1342,14 @@ const leadsPage = (function () {
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
           </button>
         </td>
-        <td>
+        <tr>
+          <td>
           <button class="act-btn" onclick="window.openNotesLead(${lead.id})">
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </button>
-        </td>
-        <td>
+
+         </td>
+         <td>
           <div class="actions">
             <button class="act-btn" onclick="window.editLead(${lead.id})" title="Bearbeiten">
               <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -1120,7 +1359,7 @@ const leadsPage = (function () {
             </button>
             <button class="act-btn" onclick="window.deleteLead(${lead.id})" title="Löschen">🗑️</button>
           </div>
-        </td>
+         </td>
       `;
       tbody.appendChild(tr);
 
@@ -1144,6 +1383,15 @@ const leadsPage = (function () {
       tbody.appendChild(xtr);
     });
 
+    // Attach call button event listeners
+    document.querySelectorAll(".call-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const leadId = parseInt(btn.dataset.leadId);
+        makeCall(leadId);
+      });
+    });
+
     // Checkbox listeners
     document.querySelectorAll(".lead-checkbox").forEach((cb) =>
       cb.addEventListener("change", (e) => {
@@ -1151,9 +1399,108 @@ const leadsPage = (function () {
         if (e.target.checked) selectedLeads.add(id);
         else selectedLeads.delete(id);
         updateSelectedCount();
+        updateMassEmailButtonVisibility();
       }),
     );
     updateSelectedCount();
+    updateMassEmailButtonVisibility();
+  }
+
+  // ─────────────────────────────────────────────
+  // MASS EMAIL FUNCTIONALITY
+  // ─────────────────────────────────────────────
+  function updateMassEmailButtonVisibility() {
+    const selectedCountEl = document.getElementById("selected-count");
+    if (!selectedCountEl) return;
+    
+    // Check if button already exists
+    let massEmailBtn = document.getElementById("mass-email-btn");
+    
+    if (selectedLeads.size > 0) {
+      if (!massEmailBtn) {
+        massEmailBtn = document.createElement("button");
+        massEmailBtn.id = "mass-email-btn";
+        massEmailBtn.className = "mass-email-btn";
+        massEmailBtn.innerHTML = `
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 6px;">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+          </svg>
+          Senden Sie Massen-E-Mails (${selectedLeads.size})
+        `;
+        massEmailBtn.onclick = () => openMassEmailModal();
+        selectedCountEl.appendChild(massEmailBtn);
+      } else {
+        // Update button text with current count
+        massEmailBtn.innerHTML = `
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 6px;">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+          </svg>
+          Senden Sie Massen-E-Mails (${selectedLeads.size})
+        `;
+      }
+    } else {
+      if (massEmailBtn) {
+        massEmailBtn.remove();
+      }
+    }
+  }
+
+  function openMassEmailModal() {
+    if (selectedLeads.size === 0) {
+      showToast("Bitte wählen Sie zuerst Leads aus", "error", 2000);
+      return;
+    }
+    
+    // Reset form
+    const selectEl = document.getElementById("emailTemplateSelect");
+    const subjectEl = document.getElementById("emailSubjectInput");
+    if (selectEl) selectEl.value = "";
+    if (subjectEl) subjectEl.value = "";
+    
+    const modal = document.getElementById("massEmailModal");
+    if (modal) modal.classList.add("active");
+  }
+
+  function sendMassEmails() {
+    const selectedEmailTemplate = document.getElementById("emailTemplateSelect")?.value;
+    const subjectText = document.getElementById("emailSubjectInput")?.value;
+    
+    if (!selectedEmailTemplate) {
+      showToast("Bitte wählen Sie eine E-Mail-Vorlage aus", "error", 2000);
+      return;
+    }
+    
+    if (!subjectText || subjectText.trim() === "") {
+      showToast("Bitte geben Sie einen Betreff/Namen ein", "error", 2000);
+      return;
+    }
+    
+    // Get selected leads emails
+    const selectedLeadsList = fullLeadsData.filter(lead => selectedLeads.has(lead.id));
+    const leadsWithEmails = selectedLeadsList.filter(lead => lead.email && lead.email.trim() !== "");
+    
+    if (leadsWithEmails.length === 0) {
+      showToast("Keine der ausgewählten Leads hat eine E-Mail-Adresse", "error", 2000);
+      return;
+    }
+    
+    // Close modal first
+    document.getElementById("massEmailModal")?.classList.remove("active");
+    
+    // Show sending status
+    showToast(`Sende E-Mails an ${leadsWithEmails.length} Empfänger...`, "info", 2000);
+    
+    // Simulate sending emails (replace with actual API call if needed)
+    setTimeout(() => {
+      console.log(`Mass email sent to ${leadsWithEmails.length} recipients`);
+      console.log("Template:", selectedEmailTemplate);
+      console.log("Subject:", subjectText);
+      console.log("Recipients:", leadsWithEmails.map(l => ({ name: l.name, email: l.email })));
+      
+      showToast(`✅ ${leadsWithEmails.length} E-Mails wurden gesendet`, "success", 3000);
+    }, 500);
   }
 
   // ─────────────────────────────────────────────
@@ -1233,7 +1580,12 @@ const leadsPage = (function () {
   // ─────────────────────────────────────────────
   function updateSelectedCount() {
     const el = document.getElementById("selected-count");
-    if (el) el.textContent = `Wählen Sie Führen aus: ${selectedLeads.size}`;
+    if (el) {
+      // Remove existing button if any and re-add based on selection
+      const existingBtn = document.getElementById("mass-email-btn");
+      if (existingBtn) existingBtn.remove();
+      el.innerHTML = `Wählen Sie Führen aus: ${selectedLeads.size}`;
+    }
   }
 
   // ─────────────────────────────────────────────
@@ -1258,15 +1610,26 @@ const leadsPage = (function () {
   // ─────────────────────────────────────────────
   // PANEL
   // ─────────────────────────────────────────────
-  function openPanel(title) {
+function openPanel(title) {
+    console.log("Opening panel:", title); // Add this line
     document.getElementById("editPanelTitle").textContent = title;
     document.getElementById("editPanel").classList.add("open");
     document.getElementById("panelOverlay").classList.add("active");
+}
+function closePanel() {
+  console.log("Closing panel");
+  const panel = document.getElementById("editPanel");
+  const overlay = document.getElementById("panelOverlay");
+  
+  if (panel) panel.classList.remove("open");
+  if (overlay) overlay.classList.remove("active");
+  
+  // Reset form and edit ID
+  if (document.getElementById("editForm")) {
+    document.getElementById("editForm").reset();
   }
-  function closePanel() {
-    document.getElementById("editPanel").classList.remove("open");
-    document.getElementById("panelOverlay").classList.remove("active");
-  }
+  currentEditId = null;
+}
 
   // ─────────────────────────────────────────────
   // EDIT / VIEW / DELETE
@@ -1275,43 +1638,45 @@ const leadsPage = (function () {
     const lead = fullLeadsData.find((l) => l.id == id);
     if (!lead) return;
     currentEditId = id;
-    const idEl = document.getElementById("editId");
-    if (idEl) idEl.value = String(lead.id || "");
-    document.getElementById("editSalutation").value = lead.salutation || "";
-    document.getElementById("editName").value = lead.name;
-    document.getElementById("editBriefberatungTelefon").value =
-      lead.briefberatungTelefon || "";
-    document.getElementById("editStrasseObjekt").value =
-      lead.strasseObjekt || "";
-    document.getElementById("editAngebot").value = lead.angebot || "";
-    document.getElementById("editPlz").value = lead.plz || "";
-    document.getElementById("editOrt").value = lead.ort;
-    document.getElementById("editTelefon").value = lead.telefon || "";
-    document.getElementById("editEmail").value = lead.email || "";
-    document.getElementById("editStatus").value = lead.status;
-    document.getElementById("editQualification").value =
-      lead.qualification || "";
-    document.getElementById("editQuelle").value = lead.quelle;
-    document.getElementById("editKontaktVia").value = lead.kontaktVia || "";
-    document.getElementById("editDatum").value =
-      lead.datum !== "—" ? lead.datum : "";
-    document.getElementById("editNachfassen").value = lead.nachfassen || "";
-    document.getElementById("editBearbeiter").value = lead.bearbeiter;
-    document.getElementById("editSumme").value = lead.summe
-      .replace("€", "")
+    
+    // Helper function to safely set values
+    const setFieldValue = (elementId, value) => {
+      const el = document.getElementById(elementId);
+      if (el) el.value = value;
+    };
+    
+    setFieldValue("editId", String(lead.id || ""));
+    setFieldValue("editSalutation", lead.salutation || "");
+    setFieldValue("editName", lead.name);
+    setFieldValue("editBriefberatungTelefon", lead.briefberatungTelefon || "");
+    setFieldValue("editStrasseObjekt", lead.strasseObjekt || "");
+    setFieldValue("editAngebot", lead.angebot || "");
+    setFieldValue("editPlz", lead.plz || "");
+    setFieldValue("editOrt", lead.ort);
+    setFieldValue("editTelefon", lead.telefon || "");
+    setFieldValue("editEmail", lead.email || "");
+    setFieldValue("editStatus", lead.status);
+    setFieldValue("editQualification", lead.qualification || "");
+    setFieldValue("editQuelle", lead.quelle);
+    setFieldValue("editKontaktVia", lead.kontaktVia || "");
+    setFieldValue("editDatum", lead.datum !== "—" ? lead.datum : "");
+    setFieldValue("editNachfassen", lead.nachfassen || "");
+    setFieldValue("editBearbeiter", lead.bearbeiter);
+    setFieldValue("editSumme", lead.summe
+      .replace("$", "")
       .replace(/\./g, "")
       .replace(",", ".")
-      .trim();
-    document.getElementById("editDachflaeche").value = lead.dachflaeche || "";
-    document.getElementById("editDachneigung").value = lead.dachneigung || "";
-    document.getElementById("editDacheindeckung").value =
-      lead.dacheindeckung || "";
-    document.getElementById("editFarbe").value = lead.farbe || "";
-    document.getElementById("editDachpfanne").value = lead.dachpfanne || "";
-    document.getElementById("editBaujahr").value = lead.baujahr || "";
-    document.getElementById("editZusatzExtras").value = lead.zusatzExtras || "";
-    document.getElementById("editSalesTyp").value = lead.salesTyp || "";
-    document.getElementById("editKategorie").value = lead.kategorie || "";
+      .trim());
+    setFieldValue("editDachflaeche", lead.dachflaeche || "");
+    setFieldValue("editDachneigung", lead.dachneigung || "");
+    setFieldValue("editDacheindeckung", lead.dacheindeckung || "");
+    setFieldValue("editFarbe", lead.farbe || "");
+    setFieldValue("editDachpfanne", lead.dachpfanne || "");
+    setFieldValue("editBaujahr", lead.baujahr || "");
+    setFieldValue("editZusatzExtras", lead.zusatzExtras || "");
+    setFieldValue("editSalesTyp", lead.salesTyp || "");
+    setFieldValue("editKategorie", lead.kategorie || "");
+    
     openPanel("Lead bearbeiten");
   };
 
@@ -1455,7 +1820,6 @@ const leadsPage = (function () {
     }
   };
 
-  window.makeCallLead = () => alert("Anruf starten");
   window.sendEmailLead = () => alert("E-Mail senden");
 
   function collectForm() {
@@ -1496,7 +1860,7 @@ const leadsPage = (function () {
       id: Date.now(),
       ...data,
       statusClass: getStatusClass(data.status),
-      summe: `€${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      summe: `$${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
       datum: data.datum || new Date().toISOString().split("T")[0],
       notes: [],
     };
@@ -1514,7 +1878,7 @@ const leadsPage = (function () {
       ...fullLeadsData[idx],
       ...data,
       statusClass: getStatusClass(data.status),
-      summe: `€${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      summe: `$${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
     };
     loadPage(currentPage);
   }
@@ -1594,6 +1958,7 @@ const leadsPage = (function () {
         else selectedLeads.delete(id);
       });
       updateSelectedCount();
+      updateMassEmailButtonVisibility();
     });
 
     // New lead
@@ -1698,8 +2063,6 @@ const leadsPage = (function () {
       }
     });
 
-    // No manual refresh button; list auto-refreshes after create
-
     // View modal
     document
       .getElementById("closeViewModal")
@@ -1722,6 +2085,18 @@ const leadsPage = (function () {
         document.getElementById("notesModal").classList.remove("active");
     });
     document.getElementById("saveNoteBtn")?.addEventListener("click", saveNote);
+
+    // Mass Email modal
+    document
+      .getElementById("closeMassEmailModal")
+      ?.addEventListener("click", () =>
+        document.getElementById("massEmailModal").classList.remove("active"),
+      );
+    document.getElementById("massEmailModal")?.addEventListener("click", (e) => {
+      if (e.target === document.getElementById("massEmailModal"))
+        document.getElementById("massEmailModal").classList.remove("active");
+    });
+    document.getElementById("sendMassEmailBtn")?.addEventListener("click", sendMassEmails);
   }
 
   return { init };

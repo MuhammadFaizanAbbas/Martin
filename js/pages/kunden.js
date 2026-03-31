@@ -22,8 +22,6 @@ const kundenPage = (function () {
   let selectedKunden = new Set();
   let checkedEdit = new Set();
   let kundenActiveFilter = "offen";
-  let currentPage = 1;
-  let rowsPerPage = 20;
   let filteredData = [];
   let isLoading = false;
 
@@ -113,8 +111,8 @@ const kundenPage = (function () {
       quelle: apiLead.lead_quelle || "—",
       bearbeiter: apiLead.bearbeiter || "—",
       summe: apiLead.summe_netto
-        ? `€ ${formatNumber(apiLead.summe_netto)}`
-        : "€ 0,00",
+        ? `$ ${formatNumber(apiLead.summe_netto)}`
+        : "$ 0,00",
       datum: apiLead.created_at
         ? apiLead.created_at.split(" ")[0]
         : apiLead.datum || "—",
@@ -339,30 +337,18 @@ const kundenPage = (function () {
     }
 
     filteredData = data;
-    const totalPages = Math.max(
-      1,
-      Math.ceil(filteredData.length / rowsPerPage),
-    );
-    if (currentPage > totalPages) currentPage = totalPages;
-    if (currentPage < 1) currentPage = 1;
-
-    const pageData = filteredData.slice(
-      (currentPage - 1) * rowsPerPage,
-      currentPage * rowsPerPage,
-    );
 
     const tbody = document.getElementById("kunden-tbody");
     if (!tbody) return;
     tbody.innerHTML = "";
 
-    if (!pageData.length) {
+    if (!filteredData.length) {
       tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">Keine Kunden in dieser Kategorie.</div></tr>`;
       updateCount();
-      renderPagination(totalPages);
       return;
     }
 
-    pageData.forEach((lead) => {
+    filteredData.forEach((lead) => {
       const isExp = expandedRows.has(lead.id);
       const editCb = checkedEdit.has(lead.id);
       const displayName =
@@ -370,7 +356,10 @@ const kundenPage = (function () {
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td><input type="checkbox" class="cb kunden-cb" data-id="${lead.id}" ${selectedKunden.has(lead.id) ? "checked" : ""}></td>
+        <tr>
+        <td>
+          <input type="checkbox" class="cb kunden-cb" data-id="${lead.id}" ${selectedKunden.has(lead.id) ? "checked" : ""}>
+        </td>
         <td>
           <button class="expand-btn ${isExp ? "open" : ""}" onclick="window.toggleKundenExpand(${lead.id})">
             <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
@@ -382,8 +371,10 @@ const kundenPage = (function () {
         <td>${lead.quelle ? `<span class="tag">${escapeHtml(lead.quelle)}</span>` : ""}</td>
         <td>${lead.bearbeiter ? `<span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span>` : ""}</td>
         <td>
-          <div style="width:42px;height:22px;background:#e2e8f0;border-radius:11px;position:relative;cursor:pointer;transition:background 0.2s" 
-               onclick="window.toggleDelegate(${lead.id},this)" data-on="false">
+              <div style="width:32px;height:32px;border-radius:50%;background:#f0f0f0;"></div>
+
+        
+          
             <div style="width:18px;height:18px;background:white;border-radius:50%;position:absolute;top:2px;left:2px;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2)"></div>
           </div>
         </td>
@@ -458,102 +449,11 @@ const kundenPage = (function () {
     });
 
     updateCount();
-    renderPagination(totalPages);
   }
 
   function updateCount() {
     const el = document.getElementById("kunden-selected-count");
     if (el) el.textContent = `Wählen Sie Leads aus: ${selectedKunden.size}`;
-  }
-
-  // ── Pagination ────────────────────────────────────────────────────────────
-  function renderPagination(totalPages) {
-    const existingPagination = document.querySelector(".pagination-container");
-    if (existingPagination) existingPagination.remove();
-    if (totalPages <= 1) return;
-
-    const wrap = document.createElement("div");
-    wrap.className = "pagination-container";
-
-    const prev = document.createElement("button");
-    prev.className = "pg-btn";
-    prev.textContent = "«";
-    prev.disabled = currentPage === 1;
-    prev.onclick = () => {
-      if (currentPage > 1) {
-        currentPage--;
-        renderKunden();
-      }
-    };
-    wrap.appendChild(prev);
-
-    const maxV = 5;
-    const start = Math.max(1, currentPage - 2);
-    const end = Math.min(totalPages, start + maxV - 1);
-    if (start > 1) {
-      addPgBtn(wrap, 1);
-      if (start > 2) addDots(wrap);
-    }
-    for (let i = start; i <= end; i++) addPgBtn(wrap, i);
-    if (end < totalPages) {
-      if (end < totalPages - 1) addDots(wrap);
-      addPgBtn(wrap, totalPages);
-    }
-
-    const next = document.createElement("button");
-    next.className = "pg-btn";
-    next.textContent = "»";
-    next.disabled = currentPage === totalPages;
-    next.onclick = () => {
-      if (currentPage < totalPages) {
-        currentPage++;
-        renderKunden();
-      }
-    };
-    wrap.appendChild(next);
-
-    const right = document.createElement("div");
-    right.className = "pg-right";
-    const startIdx = (currentPage - 1) * rowsPerPage + 1;
-    const endIdx = Math.min(currentPage * rowsPerPage, filteredData.length);
-    right.innerHTML = `<span class="pg-info">${startIdx}-${endIdx} von ${filteredData.length}</span>`;
-    const sel = document.createElement("select");
-    sel.className = "pg-rows-sel";
-    [10, 20, 50, 100].forEach((v) => {
-      const o = document.createElement("option");
-      o.value = v;
-      o.textContent = v + " pro Seite";
-      if (v === rowsPerPage) o.selected = true;
-      sel.appendChild(o);
-    });
-    sel.onchange = (e) => {
-      rowsPerPage = parseInt(e.target.value);
-      currentPage = 1;
-      renderKunden();
-    };
-    right.appendChild(sel);
-    wrap.appendChild(right);
-
-    const tableWrap = document.querySelector(".table-wrap");
-    if (tableWrap) tableWrap.insertAdjacentElement("afterend", wrap);
-  }
-
-  function addPgBtn(wrap, i) {
-    const b = document.createElement("button");
-    b.className = "pg-num" + (i === currentPage ? " active" : "");
-    b.textContent = i;
-    b.onclick = () => {
-      currentPage = i;
-      renderKunden();
-    };
-    wrap.appendChild(b);
-  }
-
-  function addDots(wrap) {
-    const s = document.createElement("span");
-    s.className = "pg-dots";
-    s.textContent = "...";
-    wrap.appendChild(s);
   }
 
   function escapeHtml(str) {
@@ -569,12 +469,10 @@ const kundenPage = (function () {
   // ── Global window functions ───────────────────────────────────────────────
   window.setKundenFilter = (key) => {
     kundenActiveFilter = key;
-    currentPage = 1;
     renderKunden();
   };
   window.clearKundenFilter = () => {
     kundenActiveFilter = null;
-    currentPage = 1;
     renderKunden();
   };
   window.toggleKundenExpand = (id) => {
@@ -724,7 +622,7 @@ const kundenPage = (function () {
       .active-filter-pill button { background: none; border: none; cursor: pointer; font-size: 1rem; color: #166534; padding: 0 4px; }
       .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
       .search-box { display: flex; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 40px; padding: 8px 16px; gap: 8px; }
-      .search-box input { border: none; outline: none; font-size: 0.85rem; width: 220px; }
+      .search-box input { border: none; outline: none; font-size: 0.85rem; width: 220px; height: 30px; }
       .spacer { flex: 1; }
       .table-label { margin: 8px 0 16px; font-size: 0.85rem; color: #64748b; }
       .table-wrap { overflow-x: auto; background: white; border-radius: 16px; border: 1px solid #eef2f8; }
@@ -762,13 +660,6 @@ const kundenPage = (function () {
       .expand-item { display: flex; flex-direction: column; }
       .expand-item label { font-size: 0.7rem; color: #64748b; margin-bottom: 3px; }
       .expand-item span { font-size: 0.83rem; font-weight: 500; color: #0f172a; }
-      .pagination-container { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding: 12px 4px; }
-      .pg-btn, .pg-num { padding: 7px 13px; border: 1px solid #e2e8f0; background: white; border-radius: 8px; cursor: pointer; font-size: 0.83rem; color: #334155; transition: all 0.15s; }
-      .pg-num.active { background: #22c55e; border-color: #22c55e; color: white; }
-      .pg-dots { padding: 0 6px; color: #94a3b8; }
-      .pg-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-      .pg-info { font-size: 0.82rem; color: #64748b; }
-      .pg-rows-sel { padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: white; font-size: 0.82rem; cursor: pointer; }
       .k-modal-overlay { display: none; position: fixed; z-index:9999; inset: 0; background: rgba(0,0,0,0.45);  justify-content: center; align-items: center; }
       .k-modal-overlay.active { display: flex; }
       .k-modal-content { background: white; border-radius: 20px; width: 90%; max-width: 580px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: kmodalIn 0.2s ease; }
@@ -830,7 +721,7 @@ const kundenPage = (function () {
               </tr>
             </thead>
             <tbody id="kunden-tbody"></tbody>
-           </table>
+          </table>
         </div>
       </div>
 
@@ -891,7 +782,6 @@ const kundenPage = (function () {
 
     // Search input listener
     document.getElementById("kunden-search")?.addEventListener("input", () => {
-      currentPage = 1;
       renderKunden();
     });
 
