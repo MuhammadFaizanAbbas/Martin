@@ -1663,7 +1663,7 @@ function closePanel() {
     setFieldValue("editNachfassen", lead.nachfassen || "");
     setFieldValue("editBearbeiter", lead.bearbeiter);
     setFieldValue("editSumme", lead.summe
-      .replace("$", "")
+      .replace(/[€$]/g, "")
       .replace(/\./g, "")
       .replace(",", ".")
       .trim());
@@ -1865,7 +1865,7 @@ function closePanel() {
       id: Date.now(),
       ...data,
       statusClass: getStatusClass(data.status),
-      summe: `$${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      summe: `€ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
       datum: data.datum || new Date().toISOString().split("T")[0],
       notes: [],
     };
@@ -1883,7 +1883,7 @@ function closePanel() {
       ...fullLeadsData[idx],
       ...data,
       statusClass: getStatusClass(data.status),
-      summe: `$${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      summe: `€ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
     };
     loadPage(currentPage);
   }
@@ -2019,11 +2019,14 @@ function closePanel() {
             sale_typ: data.salesTyp,
             kategorie: data.kategorie,
           };
+          // Hide panel immediately per request and update UI optimistically
+          closePanel();
+          updateLead(currentEditId, data);
           await updateLeadOnAPI(currentEditId, payload);
           showToast('Lead aktualisiert. Synchronisiere…', 'success', 2200);
+          // Background refresh to reconcile with backend
           await refreshLeads();
           schedulePostCreateSync();
-          closePanel();
         } catch (err) {
           showToast(err.message || 'Aktualisierung fehlgeschlagen', 'error', 2800);
         }
@@ -2058,11 +2061,12 @@ function closePanel() {
           sale_typ: data.salesTyp,
           kategorie: data.kategorie,
         };
+        // Hide panel immediately per request
+        closePanel();
         await createLeadOnAPI(payload);
         showToast('Lead wurde erstellt. Synchronisiere…', 'success', 2200);
         await refreshLeads();
         schedulePostCreateSync();
-        closePanel();
       } catch (err) {
         showToast(err.message || 'Erstellen fehlgeschlagen', 'error', 2800);
       }
