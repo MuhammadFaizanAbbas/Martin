@@ -2144,7 +2144,8 @@ function closePanel() {
           // Hide panel immediately per request and update UI optimistically
           closePanel();
           updateLead(currentEditId, data);
-          await updateLeadOnAPI(currentEditId, payload);
+          const resp = await updateLeadOnAPI(currentEditId, payload);
+          console.log('🔁 Update response:', resp);
           showToast('Lead aktualisiert. Synchronisiere…', 'success', 2200);
           // Background refresh to reconcile with backend
           await refreshLeads();
@@ -2186,7 +2187,8 @@ function closePanel() {
         // Hide panel immediately and add optimistic row
         closePanel();
         addPendingCreate(data);
-        await createLeadOnAPI(payload);
+        const resp = await createLeadOnAPI(payload);
+        console.log('🆕 Create response:', resp);
         showToast('Lead wurde erstellt. Synchronisiere…', 'success', 2200);
         await refreshLeads();
         schedulePostCreateSync();

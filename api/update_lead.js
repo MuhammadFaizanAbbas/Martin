@@ -40,6 +40,7 @@ export default async function handler(req, res) {
     try { json = JSON.parse(text); }
     catch { json = { status: 'success', raw: text }; }
 
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json(json);
   } catch (err) {
     return res.status(500).json({ status: 'error', message: err.message });
