@@ -226,7 +226,7 @@ const leadsPage = (function () {
             <div class="form-group"><label>Dachneigung Grad</label>
             <select id="editDachneigung">
             <option value="">Wählen...</option>
-            <option value="0-15°">0-15°</option>
+            <option value="0-10">0-15°</option>
             <option value="15-25°">15-25°</option>
             <option value="25-45°">25-45°</option>
             <option value="45-55°">45-55°</option>
@@ -1039,75 +1039,37 @@ const leadsPage = (function () {
   }
 
   async function updateLeadOnAPI(id, payload) {
-  const body = { id, ...payload };
-  
-  try {
-    console.log("Updating lead via same-origin API:", UPDATE_API_SAME);
-    const res = await fetch(UPDATE_API_SAME, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json", 
-        "Accept": "application/json" 
-      },
-      body: JSON.stringify(body),
-    });
-    
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorText}`);
+    const body = { id, ...payload };
+    try {
+      const res = await fetch(UPDATE_API_SAME, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data && (data.status === "success" || data.success === true)) return data;
+      if (data) return data;
+      throw new Error("Invalid response format");
+    } catch (err) {
+      console.warn("Update via same-origin failed, trying direct (may hit CORS locally)", err.message);
     }
-    
-    const data = await res.json();
-    console.log("Update response from same-origin:", data);
-    
-    if (data && (data.status === "success" || data.success === true)) {
-      return data;
-    }
-    
-    if (data && data.id) {
-      return { status: "success", data: data };
-    }
-    
-    throw new Error("Invalid response format from update API");
-  } catch (err) {
-    console.warn("Update via same-origin failed:", err.message);
-    
-    // Try direct endpoint as fallback
     try {
       const params = new URLSearchParams();
-      Object.entries(body).forEach(([k, v]) => { 
-        if (v !== undefined && v !== null) params.append(k, String(v)); 
-      });
-      
+      Object.entries(body).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
       const res = await fetch(UPDATE_API_DIRECT, {
         method: "POST",
-        headers: { 
-          "Accept": "application/json", 
-          "Content-Type": "application/x-www-form-urlencoded" 
-        },
+        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
         body: params,
         mode: "cors",
       });
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText}`);
-      }
-      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
-      console.log("Update response from direct:", text);
-      
-      try { 
-        return JSON.parse(text); 
-      } catch { 
-        return { status: "success", raw: text }; 
-      }
-    } catch (directErr) {
-      console.error("Direct update failed:", directErr);
-      throw new Error(`Lead konnte nicht aktualisiert werden: ${directErr.message}`);
+      try { return JSON.parse(text); } catch { return { status: "success", raw: text }; }
+    } catch (err) {
+      throw new Error(`Lead konnte nicht aktualisiert werden: ${err.message}`);
     }
   }
-}
 
   function showLeadsLoadError(message) {
     const tbody = document.getElementById("leads-tbody");
@@ -1616,20 +1578,10 @@ function openPanel(title) {
     document.getElementById("editPanel").classList.add("open");
     document.getElementById("panelOverlay").classList.add("active");
 }
-function closePanel() {
-  console.log("Closing panel");
-  const panel = document.getElementById("editPanel");
-  const overlay = document.getElementById("panelOverlay");
-  
-  if (panel) panel.classList.remove("open");
-  if (overlay) overlay.classList.remove("active");
-  
-  // Reset form and edit ID
-  if (document.getElementById("editForm")) {
-    document.getElementById("editForm").reset();
+  function closePanel() {
+    document.getElementById("editPanel").classList.remove("open");
+    document.getElementById("panelOverlay").classList.remove("active");
   }
-  currentEditId = null;
-}
 
   // ─────────────────────────────────────────────
   // EDIT / VIEW / DELETE
