@@ -1072,7 +1072,23 @@ const leadsPage = (function () {
       const text = await res.text();
       try { return JSON.parse(text); } catch { return { status: "success", raw: text }; }
     } catch (err) {
-      throw new Error(`Lead konnte nicht erstellt werden: ${err.message}`);
+      console.warn('Direct create failed:', err.message);
+      // 3) Proxy fallback for local static
+      try {
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_API_DIRECT)}`;
+        const params = new URLSearchParams();
+        Object.entries(payload).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
+        const res = await fetch(proxyUrl, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        try { return JSON.parse(text); } catch { return { status: 'success', raw: text }; }
+      } catch (proxyErr) {
+        throw new Error(`Lead konnte nicht erstellt werden: ${proxyErr.message}`);
+      }
     }
   }
 
@@ -1142,7 +1158,25 @@ const leadsPage = (function () {
       }
     } catch (directErr) {
       console.error("Direct update failed:", directErr);
-      throw new Error(`Lead konnte nicht aktualisiert werden: ${directErr.message}`);
+      // Try CORS proxy as last resort for local static testing
+      try {
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(UPDATE_API_DIRECT)}`;
+        const params = new URLSearchParams();
+        Object.entries(body).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
+        const res = await fetch(proxyUrl, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params,
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(`HTTP ${res.status}: ${txt}`);
+        }
+        const text = await res.text();
+        try { return JSON.parse(text); } catch { return { status: 'success', raw: text }; }
+      } catch (proxyErr) {
+        throw new Error(`Lead konnte nicht aktualisiert werden: ${proxyErr.message}`);
+      }
     }
   }
 }
