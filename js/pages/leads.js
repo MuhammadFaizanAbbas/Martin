@@ -969,6 +969,32 @@ const leadsPage = (function () {
   const ACTIVITY_FETCH_SAME = "/api/lead_activity";
   const SAME_ORIGIN_API = "/api/leads";
 
+  // ─────────────────────────────────────────────
+  // ERROR HELPERS (friendlier messages)
+  // ─────────────────────────────────────────────
+  function stripHtml(text) {
+    if (!text) return '';
+    try { return String(text).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); } catch { return String(text); }
+  }
+
+  function friendlyApiError(context, raw) {
+    const msg = (raw || '').toString();
+    const isStaticLocal = typeof location !== 'undefined' && location.host.includes('localhost:5500');
+    if (isStaticLocal && (/501|Unsupported method|404/.test(msg))) {
+      return `${context}: Lokaler Static-Server unterstützt /api nicht. Bitte 'vercel dev' starten oder über Proxy testen.`;
+    }
+    if (/CORS|Access-Control-Allow-Origin/.test(msg)) {
+      return `${context}: Vom Browser blockiert (CORS). Nutzen Sie die gleichen /api Routen (Vercel/vercel dev).`;
+    }
+    if (/400|Bad Request/.test(msg)) {
+      return `${context}: Backend hat 400 zurückgegeben. Prüfen Sie Pflichtfelder (lead_id, status, summe_netto).`;
+    }
+    if (/Failed to fetch/.test(msg)) {
+      return `${context}: Netzwerk-/CORS-Problem. Bitte erneut versuchen oder vercel dev nutzen.`;
+    }
+    return `${context}: ${msg}`;
+  }
+
   async function fetchViaProxy(proxyUrl) {
     const res = await fetch(proxyUrl, {
       headers: { Accept: "application/json" },
@@ -1087,7 +1113,7 @@ const leadsPage = (function () {
         const text = await res.text();
         try { return JSON.parse(text); } catch { return { status: 'success', raw: text }; }
       } catch (proxyErr) {
-        throw new Error(`Lead konnte nicht erstellt werden: ${proxyErr.message}`);
+        throw new Error(friendlyApiError('Erstellen fehlgeschlagen', proxyErr.message));
       }
     }
   }
@@ -1107,8 +1133,8 @@ const leadsPage = (function () {
     });
     
     if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorText}`);
+      const errorText = stripHtml(await res.text());
+      throw new Error(`HTTP ${res.status}: ${errorText || 'Request failed'}`);
     }
     
     const data = await res.json();
@@ -1144,8 +1170,8 @@ const leadsPage = (function () {
       });
       
       if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText}`);
+        const errorText = stripHtml(await res.text());
+        throw new Error(`HTTP ${res.status}: ${errorText || 'Request failed'}`);
       }
       
       const text = await res.text();
@@ -1169,13 +1195,13 @@ const leadsPage = (function () {
           body: params,
         });
         if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(`HTTP ${res.status}: ${txt}`);
+          const txt = stripHtml(await res.text());
+          throw new Error(`HTTP ${res.status}: ${txt || 'Request failed'}`);
         }
         const text = await res.text();
         try { return JSON.parse(text); } catch { return { status: 'success', raw: text }; }
       } catch (proxyErr) {
-        throw new Error(`Lead konnte nicht aktualisiert werden: ${proxyErr.message}`);
+        throw new Error(friendlyApiError('Aktualisierung fehlgeschlagen', proxyErr.message));
       }
     }
   }
