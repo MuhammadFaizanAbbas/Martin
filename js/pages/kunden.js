@@ -1,15 +1,18 @@
 const kundenPage = (function () {
   let contentArea = null;
   let titleEl = null;
+  let fullLeadsData = [];
+  let notesCache = new Map();
+  let activityCache = new Map();
 
   // ── API URLs ──────────────────────────────────────────────────────────────
-  // Prefer same-origin Vercel API routes; fall back to direct + public proxies locally
   const SO_LEADS = "/api/leads";
   const SO_DASHBOARD = "/api/dashboard";
   const REMOTE_LEADS_URL = "https://goarrow.ai/test/fetch_all_leads.php";
   const REMOTE_DASHBOARD_URL = "https://goarrow.ai/test/dashboard.php";
+  const ACTIVITY_FETCH_SAME = "/api/lead_activity";
+  const NOTES_FETCH_SAME = "/api/lead_notes";
 
-  // CORS proxies (fallback)
   const PROXY_LEADS_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_LEADS_URL)}`;
   const PROXY_DASHBOARD_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_DASHBOARD_URL)}`;
   const ALT_PROXY_LEADS_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(REMOTE_LEADS_URL)}`;
@@ -24,8 +27,12 @@ const kundenPage = (function () {
   let kundenActiveFilter = "offen";
   let filteredData = [];
   let isLoading = false;
+  
+  // New filter states
+  let statusFilter = "";
+  let leadSourceFilter = "";
+  let ortSearchTerm = "";
 
-  // ── Status mapping ────────────────────────────────────────────────────────
   const STATUS_MAPPING = {
     Offen: "Offen",
     "follow up": "follow up",
@@ -43,7 +50,6 @@ const kundenPage = (function () {
     Storniert: "Storniert",
   };
 
-  // ── Helper: Fetch with CORS handling ──────────────────────────────────────
   function httpGetJson(url, controller) {
     return fetch(url, {
       method: "GET",
@@ -67,7 +73,6 @@ const kundenPage = (function () {
     });
   }
 
-  // Race primary endpoint with staggered fallbacks to reduce tail latency
   async function fetchFirstAvailable(urlsWithDelay) {
     const controllers = urlsWithDelay.map(() => new AbortController());
     const promises = urlsWithDelay.map((cfg, idx) =>
@@ -76,7 +81,6 @@ const kundenPage = (function () {
 
     try {
       const result = await Promise.any(promises);
-      // Abort remaining requests
       controllers.forEach((c) => {
         try { c.abort(); } catch {}
       });
@@ -86,7 +90,114 @@ const kundenPage = (function () {
     }
   }
 
-  // ── Fetch leads from API ──────────────────────────────────────────────────
+  async function fetchNotesForLead(leadId) {
+    try {
+      const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`, { 
+        headers: { Accept: 'application/json' } 
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.data || data.notes || []);
+      const normalized = (list || []).map(n => ({ 
+        text: String(n.text || n.note || n.message || ''), 
+        author: String(n.author || n.user || 'Created at'), 
+        date: String(n.date || n.created_at || '') 
+      }));
+      notesCache.set(String(leadId), normalized);
+      const idx = leadsData.findIndex(l => String(l.id) === String(leadId));
+      if (idx !== -1) leadsData[idx].notes = normalized;
+      return normalized;
+    } catch (err) {
+      console.warn('Same-origin notes fetch failed, trying proxies:', err.message);
+    }
+    
+    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}`;
+    const proxies = [
+      `https://corsproxy.io/?${encodeURIComponent(target)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+    ];
+    for (const url of proxies) {
+      try {
+        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        const list = Array.isArray(data) ? data : (data.data || data.notes || []);
+        const normalized = (list || []).map(n => ({ 
+          text: String(n.text || n.note || n.message || ''), 
+          author: String(n.author || n.user || 'System'), 
+          date: String(n.date || n.created_at || '') 
+        }));
+        notesCache.set(String(leadId), normalized);
+        const idx = leadsData.findIndex(l => String(l.id) === String(leadId));
+        if (idx !== -1) leadsData[idx].notes = normalized;
+        return normalized;
+      } catch (e) {
+        console.warn('Notes proxy failed:', url, e.message);
+      }
+    }
+    return [];
+  }
+
+  async function fetchActivityForLead(leadId) {
+    const normalize = (a) => {
+      const text = a.text || a.activity || a.action || a.event || a.message || a.desc || a.description || '';
+      const by = a.from || a.by || a.user || a.username || a.author || a.created_by || 'System';
+      let at = a.at || a.datetime || a.timestamp || a.date_time || a.date || a.created_at || '';
+      if (!at) {
+        const d = a.activity_date || a.activityDate || a.date;
+        const t = a.activity_time || a.activityTime || a.time;
+        if (d || t) at = `${d || ''}${d && t ? ' ' : ''}${t || ''}`.trim();
+      }
+      return { text: String(text || ''), by: String(by || 'System'), at: String(at || '') };
+    };
+
+    async function tryFetch(url) {
+      const r = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      console.log('🔎 Activity raw data:', data);
+      const list = Array.isArray(data) ? data : (data.data || data.activity || data.items || []);
+      return (list || []).map(normalize);
+    }
+
+    try {
+      let list = await tryFetch(`${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`);
+      if (!list.length) {
+        list = await tryFetch(`${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`);
+      }
+      if (list.length) {
+        activityCache.set(String(leadId), list);
+        return list;
+      }
+    } catch (err) {
+      console.warn('Same-origin activity fetch failed:', err.message);
+    }
+
+    const base = 'https://goarrow.ai/test/fetch_activity.php';
+    const targets = [
+      `${base}?lead_id=${encodeURIComponent(leadId)}`,
+      `${base}?id=${encodeURIComponent(leadId)}`,
+    ];
+    const proxies = (t) => [
+      `https://corsproxy.io/?${encodeURIComponent(t)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(t)}`,
+    ];
+    for (const t of targets) {
+      for (const url of proxies(t)) {
+        try {
+          const list = await tryFetch(url);
+          if (list.length) {
+            activityCache.set(String(leadId), list);
+            return list;
+          }
+        } catch (e) {
+          console.warn('Activity proxy failed:', url, e.message);
+        }
+      }
+    }
+    return [];
+  }
+
   async function fetchLeads() {
     const result = await fetchFirstAvailable([
       { url: SO_LEADS, delay: 0 },
@@ -99,12 +210,10 @@ const kundenPage = (function () {
       return [];
     }
 
-    // Accept multiple upstream shapes
     const rawList = Array.isArray(result.data)
       ? result.data
       : (result.data.data || result.data.leads || result.data.items || []);
 
-    // Transform API data to our internal format
     return (rawList || []).map((apiLead) => ({
       id: apiLead.id,
       name: apiLead.name || "—",
@@ -133,10 +242,11 @@ const kundenPage = (function () {
       email: apiLead.email || "",
       nachfassen: apiLead.nachfassen,
       delegieren: apiLead.delegieren,
+      notes: [],
+      activities: [],
     }));
   }
 
-  // ── Fetch dashboard stats from API ────────────────────────────────────────
   async function fetchDashboardStats() {
     const result = await fetchFirstAvailable([
       { url: SO_DASHBOARD, delay: 0 },
@@ -155,26 +265,26 @@ const kundenPage = (function () {
     return {};
   }
 
-  // ── Load all data ─────────────────────────────────────────────────────────
   async function loadAllData() {
     if (isLoading) return;
     isLoading = true;
 
     const tbody = document.getElementById("kunden-tbody");
     if (tbody) {
-      tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">⏳ Daten werden geladen...</div></td></tr>`;
+      tbody.innerHTML = `<td colspan="14"><div class="empty-state">⏳ Daten werden geladen...</div>`;
     }
 
-    // Kick off both requests without blocking UI
     fetchLeads()
       .then((leads) => {
         leadsData = leads;
+        fullLeadsData = leads;
+        populateFilterOptions();
         renderKunden();
       })
       .catch((e) => {
         console.error("Leads load failed", e);
         if (tbody) {
-          tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div></td></tr>`;
+          tbody.innerHTML = `|<td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div>`;
         }
       })
       .finally(() => {
@@ -191,7 +301,47 @@ const kundenPage = (function () {
       });
   }
 
-  // ── Format number for display ─────────────────────────────────────────────
+  // Populate filter dropdowns with unique values
+  function populateFilterOptions() {
+    // Get unique statuses
+    const uniqueStatuses = [...new Set(leadsData.map(lead => lead.status).filter(s => s && s !== "—"))];
+    const statusSelect = document.getElementById("filter-status");
+    if (statusSelect) {
+      statusSelect.innerHTML = '<option value="">Alle Status</option>' + 
+        uniqueStatuses.map(status => `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`).join('');
+    }
+    
+    // Get unique lead sources
+    const uniqueSources = [...new Set(leadsData.map(lead => lead.quelle).filter(s => s && s !== "—"))];
+    const sourceSelect = document.getElementById("filter-source");
+    if (sourceSelect) {
+      sourceSelect.innerHTML = '<option value="">Alle Quellen</option>' + 
+        uniqueSources.map(source => `<option value="${escapeHtml(source)}">${escapeHtml(source)}</option>`).join('');
+    }
+  }
+
+  // Apply all filters
+  function applyFilters() {
+    renderKunden();
+  }
+
+  // Reset all filters
+  function resetFilters() {
+    statusFilter = "";
+    leadSourceFilter = "";
+    ortSearchTerm = "";
+    
+    const statusSelect = document.getElementById("filter-status");
+    const sourceSelect = document.getElementById("filter-source");
+    const ortInput = document.getElementById("filter-ort");
+    
+    if (statusSelect) statusSelect.value = "";
+    if (sourceSelect) sourceSelect.value = "";
+    if (ortInput) ortInput.value = "";
+    
+    renderKunden();
+  }
+
   function formatNumber(num) {
     if (!num || num === "0.00") return "0,00";
     return parseFloat(num).toLocaleString("de-DE", {
@@ -200,7 +350,6 @@ const kundenPage = (function () {
     });
   }
 
-  // ── Get status badge class ────────────────────────────────────────────────
   function getStatusClass(status) {
     const statusLower = (status || "").toLowerCase();
     if (statusLower === "follow up") return "badge-follow";
@@ -220,30 +369,45 @@ const kundenPage = (function () {
     return "badge-offen";
   }
 
-  // ── Get stat definitions with real counts ─────────────────────────────────
+  function shouldShowPhoneIcon() {
+    if (kundenActiveFilter === "bearbeitung") return false;
+    if (kundenActiveFilter === "beauft") return false;
+    return true;
+  }
+
+  function shouldShowEmailIcon() {
+    if (kundenActiveFilter === "offen") return false;
+    if (kundenActiveFilter === "beauft") return false;
+    return true;
+  }
+
   function getStatDefinitions() {
     return [
       {
         key: "offen",
         label: "Offen",
+        icon: "📞",
         count: dashboardStats.Offen || 0,
         filter: (l) => l.status === "Offen",
       },
       {
         key: "bearbeitung",
         label: "in Bearbeitung",
+        icon: "📞",
         count: dashboardStats["in Bearbeitung"] || 0,
         filter: (l) => l.status === "in Bearbeitung",
       },
       {
         key: "followup",
-        label: "Follow up",
+        label: "follow up",
+        icon: "📞",
         count: dashboardStats["follow up"] || 0,
         filter: (l) => l.status === "follow up",
       },
       {
         key: "auftrags",
         label: "Auftragsbestätigung",
+        icon: "📞",
         count: 0,
         filter: (l) => l.status === "Auftragsbestätigung",
       },
@@ -264,7 +428,6 @@ const kundenPage = (function () {
     ];
   }
 
-  // ── Render stats cards with real data ─────────────────────────────────────
   function renderStats() {
     const el = document.getElementById("kunden-stats");
     if (!el) return;
@@ -297,7 +460,6 @@ const kundenPage = (function () {
     el.innerHTML = html;
   }
 
-  // ── Show/Hide mass email button based on selections ───────────────────────
   function updateMassEmailButton() {
     const massEmailBtn = document.getElementById("mass-email-btn");
     const selectedCount = selectedKunden.size;
@@ -318,13 +480,11 @@ const kundenPage = (function () {
     }
   }
 
-  // ── Open mass email modal with selected leads ─────────────────────────────
   function openMassEmailModal() {
     if (selectedKunden.size === 0) return;
     
     const selectedLeads = leadsData.filter(lead => selectedKunden.has(lead.id));
     
-    // Create modal HTML
     const modalHtml = `
       <div id="massEmailModal" class="k-modal-overlay">
         <div class="k-modal-content" style="max-width: 650px;">
@@ -336,128 +496,57 @@ const kundenPage = (function () {
             <div class="form-group" style="margin-bottom: 20px;">
               <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Choose an E-Mail</label>
               <select id="email-template-select" class="k-full-select">
-              <option value="E1">E1</option>
-              <option value="E2">E2</option>
-              <option value="E3">E3</option>
-              <option value="E4">E4</option>
-              <option value="E5">E5</option>
-              <option value="E6">E6</option>
-              <option value="E7">E7</option>
-              <option value="E8">E8</option>
-              <option value="E9">E9</option>
-              <option value="E10">E10</option>
+                <option value="E1">E1</option>
+                <option value="E2">E2</option>
+                <option value="E3">E3</option>
+                <option value="E4">E4</option>
+                <option value="E5">E5</option>
+                <option value="E6">E6</option>
+                <option value="E7">E7</option>
+                <option value="E8">E8</option>
+                <option value="E9">E9</option>
+                <option value="E10">E10</option>
               </select>
-            </div>
-            
-            <div class="email-recipients-list" style="margin-bottom: 20px;">
-              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Empfänger (${selectedLeads.length})</label>
-              <div style="max-height: 200px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
-                ${selectedLeads.map(lead => {
-                  const displayName = (lead.salutation ? lead.salutation + " " : "") + lead.name;
-                  return `
-                    <div style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 8px;">
-                      <input type="checkbox" class="recipient-checkbox" data-id="${lead.id}" data-name="${escapeHtml(displayName)}" data-email="${escapeHtml(lead.email)}" checked style="accent-color: #22c55e;">
-                      <div style="flex: 1;">
-                        <div style="font-weight: 500; font-size: 0.85rem;">${escapeHtml(displayName)}</div>
-                        <div style="font-size: 0.75rem; color: #64748b;">${escapeHtml(lead.email)}</div>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
-              </div>
-              <div style="margin-top: 8px;">
-                <button type="button" id="select-all-recipients" class="k-btn-outline" style="font-size: 0.75rem; padding: 4px 8px;">Alle auswählen</button>
-                <button type="button" id="deselect-all-recipients" class="k-btn-outline" style="font-size: 0.75rem; padding: 4px 8px; margin-left: 8px;">Alle abwählen</button>
-              </div>
             </div>
             
             <div class="form-group" style="margin-bottom: 20px;">
               <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Name</label>
-              <input type="text" id="email-name" placeholder="Name" class="k-full-input" style="padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%;">
+              <div style="padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; color: #0f172a;">
+                ${selectedLeads.map(lead => {
+                  const displayName = (lead.salutation ? lead.salutation + " " : "") + lead.name;
+                  return `<div style="margin-bottom: 5px;">${escapeHtml(displayName)}</div>`;
+                }).join('')}
+              </div>
             </div>
             
             <div class="form-group" style="margin-bottom: 20px;">
-              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">E-Mail Betreff</label>
-              <input type="text" id="email-subject" placeholder="Betreff" class="k-full-input" style="padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%;">
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Nachricht</label>
-              <textarea id="email-message" rows="6" placeholder="Ihre Nachricht hier..." class="k-full-input" style="padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; font-family: inherit;"></textarea>
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Notiz</label>
-              <input type="text" id="email-note" placeholder="Notiz" class="k-full-input" style="padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">E-Mail</label>
+              <div style="padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; color: #0f172a;">
+                ${selectedLeads.map(lead => {
+                  return `<div style="margin-bottom: 5px;">${escapeHtml(lead.email || "—")}</div>`;
+                }).join('')}
+              </div>
             </div>
             
             <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
-              <button type="button" id="cancelMassEmail" class="k-btn-outline" style="padding: 10px 20px; border: 1px solid #e2e8f0; background: white; border-radius: 8px; cursor: pointer;">Abbrechen</button>
-              <button type="button" id="sendMassEmail" class="k-btn-green">E-Mail senden</button>
+              <button type="button" id="cancelMassEmail" class="k-btn-outline" style="padding: 10px 24px; border: 1px solid #e2e8f0; background: white; border-radius: 8px; cursor: pointer;">Abbrechen</button>
+              <button type="button" id="sendMassEmail" class="k-btn-green" style="padding: 10px 24px;">E-Mail senden</button>
             </div>
           </div>
         </div>
       </div>
     `;
     
-    // Remove existing modal if present
     const existingModal = document.getElementById("massEmailModal");
     if (existingModal) existingModal.remove();
     
-    // Add modal to body
     document.body.insertAdjacentHTML('beforeend', modalHtml);
     
     const modal = document.getElementById("massEmailModal");
     const closeBtn = document.getElementById("closeMassEmailModal");
     const cancelBtn = document.getElementById("cancelMassEmail");
     const sendBtn = document.getElementById("sendMassEmail");
-    const selectAllBtn = document.getElementById("select-all-recipients");
-    const deselectAllBtn = document.getElementById("deselect-all-recipients");
-    const emailSelect = document.getElementById("email-template-select");
-    const nameInput = document.getElementById("email-name");
-    const subjectInput = document.getElementById("email-subject");
-    const messageInput = document.getElementById("email-message");
     
-    // Template presets
-    const templates = {
-      standard: {
-        subject: "Informationen zu Ihrem Dachprojekt",
-        message: "Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihr Interesse an unseren Dienstleistungen. Wir möchten Sie gerne zu einem persönlichen Gespräch einladen, um Ihre Möglichkeiten zu besprechen.\n\nBitte lassen Sie uns wissen, wann es Ihnen passt.\n\nMit freundlichen Grüßen,\nIhr Team"
-      },
-      followup: {
-        subject: "Follow-up zu Ihrem Angebot",
-        message: "Hallo,\n\nich wollte mich erkundigen, ob Sie bereits Gelegenheit hatten, unser Angebot zu prüfen. Sollten Sie Fragen haben, stehe ich gerne zur Verfügung.\n\nIch freue mich auf Ihre Rückmeldung.\n\nBeste Grüße"
-      },
-      offer: {
-        subject: "Ihr persönliches Angebot",
-        message: "Guten Tag,\n\nanbei erhalten Sie Ihr persönliches Angebot für Ihr Dachprojekt. Bei Fragen können Sie mich jederzeit kontaktieren.\n\nIch freue mich auf die Zusammenarbeit.\n\nViele Grüße"
-      }
-    };
-    
-    // Load template on select change
-    emailSelect.addEventListener('change', () => {
-      const template = templates[emailSelect.value];
-      if (template && emailSelect.value !== 'custom') {
-        subjectInput.value = template.subject;
-        messageInput.value = template.message;
-      }
-    });
-    
-    // Select all recipients
-    if (selectAllBtn) {
-      selectAllBtn.addEventListener('click', () => {
-        document.querySelectorAll('.recipient-checkbox').forEach(cb => cb.checked = true);
-      });
-    }
-    
-    // Deselect all recipients
-    if (deselectAllBtn) {
-      deselectAllBtn.addEventListener('click', () => {
-        document.querySelectorAll('.recipient-checkbox').forEach(cb => cb.checked = false);
-      });
-    }
-    
-    // Close modal
     const closeModal = () => {
       modal.classList.remove('active');
       setTimeout(() => modal.remove(), 300);
@@ -469,66 +558,34 @@ const kundenPage = (function () {
       if (e.target === modal) closeModal();
     });
     
-    // Send emails
     sendBtn?.addEventListener('click', () => {
-      const selectedRecipients = Array.from(document.querySelectorAll('.recipient-checkbox:checked')).map(cb => ({
-        id: parseInt(cb.dataset.id),
-        name: cb.dataset.name,
-        email: cb.dataset.email
-      }));
+      const selectedTemplate = document.getElementById("email-template-select")?.value || "";
       
-      if (selectedRecipients.length === 0) {
-        alert("Bitte wählen Sie mindestens einen Empfänger aus.");
-        return;
-      }
+      const emailData = selectedLeads.map(lead => {
+        return {
+          id: lead.id,
+          name: (lead.salutation ? lead.salutation + " " : "") + lead.name,
+          email: lead.email,
+          datum: lead.datum,
+        };
+      });
       
-      const name = nameInput.value.trim();
-      const subject = subjectInput.value.trim();
-      const message = messageInput.value.trim();
-      const note = document.getElementById("email-note")?.value.trim() || "";
-      
-      if (!subject) {
-        alert("Bitte geben Sie einen Betreff ein.");
-        return;
-      }
-      
-      if (!message) {
-        alert("Bitte geben Sie eine Nachricht ein.");
-        return;
-      }
-      
-      // Prepare email data
-      const emailData = {
-        recipients: selectedRecipients,
-        name: name,
-        subject: subject,
-        message: message,
-        note: note,
+      const massEmailData = {
+        template: selectedTemplate,
+        recipients: emailData,
         date: new Date().toISOString()
       };
       
-      console.log("Sending mass email:", emailData);
+      console.log("Sending mass email:", massEmailData);
+      alert(`E-Mails werden gesendet:\n\nTemplate: ${selectedTemplate}\nEmpfänger: ${emailData.length}\n\nDetails in Console einsehbar`);
       
-      // Here you would send the emails via your API
-      // For now, show success message
-      alert(`E-Mails werden an ${selectedRecipients.length} Empfänger gesendet:\n\nBetreff: ${subject}\n\nNachricht: ${message.substring(0, 100)}...`);
-      
-      // Close modal
       closeModal();
     });
     
-    // Show modal
     modal.classList.add('active');
-    
-    // Load initial template
-    const initialTemplate = templates.standard;
-    subjectInput.value = initialTemplate.subject;
-    messageInput.value = initialTemplate.message;
   }
 
-  // ── Main render function ──────────────────────────────────────────────────
   function renderKunden() {
-    // Check if we have data
     if (!leadsData.length) {
       renderStats();
       return;
@@ -539,7 +596,6 @@ const kundenPage = (function () {
     const statDefs = getStatDefinitions();
     const activeDef = statDefs.find((d) => d.key === kundenActiveFilter);
 
-    // Filter pill - safely check if element exists
     const pillEl = document.getElementById("kunden-filter-pill");
     if (pillEl) {
       if (activeDef) {
@@ -554,20 +610,45 @@ const kundenPage = (function () {
       }
     }
 
-    // Search filter
+    // Get filter values
     const searchInput = document.getElementById("kunden-search");
     const searchTerm = (searchInput?.value || "").toLowerCase();
+    statusFilter = document.getElementById("filter-status")?.value || "";
+    leadSourceFilter = document.getElementById("filter-source")?.value || "";
+    ortSearchTerm = (document.getElementById("filter-ort")?.value || "").toLowerCase();
 
     // Apply filters
     let data = leadsData.slice();
+    
+    // Apply status card filter
     if (activeDef && activeDef.filter) {
       data = data.filter(activeDef.filter);
     }
+    
+    // Apply status dropdown filter
+    if (statusFilter) {
+      data = data.filter(l => l.status === statusFilter);
+    }
+    
+    // Apply lead source dropdown filter
+    if (leadSourceFilter) {
+      data = data.filter(l => l.quelle === leadSourceFilter);
+    }
+    
+    // Apply search term filter (name or ort)
     if (searchTerm) {
       data = data.filter(
         (l) =>
           l.name.toLowerCase().includes(searchTerm) ||
           l.ort.toLowerCase().includes(searchTerm),
+      );
+    }
+    
+    // Apply ort search filter
+    if (ortSearchTerm) {
+      data = data.filter(
+        (l) =>
+          l.ort.toLowerCase().includes(ortSearchTerm),
       );
     }
 
@@ -578,10 +659,13 @@ const kundenPage = (function () {
     tbody.innerHTML = "";
 
     if (!filteredData.length) {
-      tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">Keine Kunden in dieser Kategorie.</div></td></tr>`;
+      tbody.innerHTML = `<td colspan="14"><div class="empty-state">Keine Kunden in dieser Kategorie.</div>`;
       updateCount();
       return;
     }
+
+    const showPhoneIcon = shouldShowPhoneIcon();
+    const showEmailIcon = shouldShowEmailIcon();
 
     filteredData.forEach((lead) => {
       const isExp = expandedRows.has(lead.id);
@@ -591,39 +675,52 @@ const kundenPage = (function () {
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td>
+        <tr>
+          <td>
           <input type="checkbox" class="cb kunden-cb" data-id="${lead.id}" ${selectedKunden.has(lead.id) ? "checked" : ""}>
-        </td>
-        <td>
+         </td>
+         <td>
           <button class="expand-btn ${isExp ? "open" : ""}" onclick="window.toggleKundenExpand(${lead.id})">
             <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
-        </td>
-        <td><span style="font-weight:500">${escapeHtml(displayName)}</span></td>
+         </td>
+         <td><span style="font-weight:500">${escapeHtml(displayName)}</span></td>
         <td style="font-size:0.8rem;color:#64748b">${escapeHtml(lead.ort)}</td>
-        <td><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></td>
-        <td>${lead.quelle ? `<span class="tag">${escapeHtml(lead.quelle)}</span>` : ""}</td>
-        <td>${lead.bearbeiter ? `<span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span>` : ""}</td>
-        <td>
+         <td><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></td>
+         <td>${lead.quelle ? `<span class="tag">${escapeHtml(lead.quelle)}</span>` : ""}</td>
+         <td>${lead.bearbeiter ? `<span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span>` : ""}</td>
+         <td>
           <div style="width:32px;height:32px;border-radius:50%;background:#f0f0f0;"></div>
-        </td>
-        <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
-        <td><span class="date-cell">${escapeHtml(lead.datum)}</span></td>
-        <td>
+         </td>
+         <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
+         <td><span class="date-cell">${escapeHtml(lead.datum)}</span></td>
+         <td>
           <button class="act-btn" onclick="window.viewKunde(${lead.id})" title="Details anzeigen">
             <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
             </svg>
           </button>
-        </td>
-        <td>
-          <button class="act-btn-green" onclick="window.callKunde(${lead.id})" title="Anrufen">
-            <svg width="14" height="14" fill="white" stroke="white" stroke-width="1.5" viewBox="0 0 24 24">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.08 5.18 2 2 0 0 1 5.06 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.09 10.91A16 16 0 0 0 13.09 15l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16z"/>
-            </svg>
-          </button>
-        </td>
-        <td>
+         </td>
+         <td>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            ${showPhoneIcon ? `
+              <button class="act-btn-green" onclick="window.callKunde(${lead.id})" title="Anrufen">
+                <svg width="14" height="14" fill="white" stroke="white" stroke-width="1.5" viewBox="0 0 24 24">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.08 5.18 2 2 0 0 1 5.06 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.09 10.91A16 16 0 0 0 13.09 15l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16z"/>
+                </svg>
+              </button>
+            ` : ''}
+            ${showEmailIcon ? `
+              <button class="act-btn-email" onclick="window.sendEmailToKunde(${lead.id})" title="E-Mail senden">
+                <svg width="14" height="14" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">
+                  <rect x="2" y="4" width="20" height="16" rx="2"/>
+                  <path d="m22 7-10 7L2 7"/>
+                </svg>
+              </button>
+            ` : ''}
+          </div>
+         </td>
+         <td>
           <div class="bearbeiten-cell">
             <input type="checkbox" class="edit-cb" data-id="${lead.id}" ${editCb ? "checked" : ""} 
               onchange="window.toggleEditCheck(${lead.id},this)">
@@ -639,18 +736,17 @@ const kundenPage = (function () {
               </svg>
             </button>
           </div>
-        </td>
-        <td>
+         </td>
+         <td>
           <button class="act-btn-green-outline" onclick="window.openKarte(${lead.id})" title="Karte">
             <svg width="14" height="14" fill="none" stroke="#22c55e" stroke-width="2" viewBox="0 0 24 24">
               <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
             </svg>
           </button>
-        </td>
+         </td>
       `;
       tbody.appendChild(tr);
 
-      // Expand row
       const xtr = document.createElement("tr");
       xtr.className = `expand-row${isExp ? " open" : ""}`;
       xtr.innerHTML = `<td colspan="14"><div class="expand-grid">
@@ -663,11 +759,10 @@ const kundenPage = (function () {
         <div class="expand-item"><label>Straße</label><span>${escapeHtml(lead.strasse || "—")}</span></div>
         <div class="expand-item"><label>Telefon</label><span>${escapeHtml(lead.telefon || "—")}</span></div>
         <div class="expand-item"><label>E-Mail</label><span>${escapeHtml(lead.email || "—")}</span></div>
-      </div></td>`;
+      </div>`;
       tbody.appendChild(xtr);
     });
 
-    // Checkbox listeners
     document.querySelectorAll(".kunden-cb").forEach((cb) => {
       cb.addEventListener("change", (e) => {
         const id = parseInt(e.target.dataset.id);
@@ -697,7 +792,6 @@ const kundenPage = (function () {
       .replace(/'/g, "&#39;");
   }
 
-  // ── Global window functions ───────────────────────────────────────────────
   window.setKundenFilter = (key) => {
     kundenActiveFilter = key;
     renderKunden();
@@ -734,15 +828,59 @@ const kundenPage = (function () {
     if (modal) modal.classList.add("active");
   };
 
-  window.viewKunde = (id) => {
+  window.viewKunde = async (id) => {
     const lead = leadsData.find((l) => l.id === id);
     if (!lead) return;
-    const displayName =
-      (lead.salutation ? lead.salutation + " " : "") + lead.name;
+    
     const titleEl = document.getElementById("kundenViewTitle");
     const contentEl = document.getElementById("kundenViewContent");
-    if (titleEl) titleEl.textContent = displayName + " – Details";
+    if (titleEl) titleEl.textContent = (lead.salutation ? lead.salutation + " " : "") + lead.name + " – Details";
     if (contentEl) {
+      contentEl.innerHTML = `<div style="text-align: center; padding: 40px;">⏳ Lade Notizen und Aktivitäten...</div>`;
+    }
+    
+    const [notes, activities] = await Promise.all([
+      fetchNotesForLead(lead.id),
+      fetchActivityForLead(lead.id)
+    ]);
+    
+    if (contentEl) {
+      let notesHtml = '';
+      if (notes && notes.length > 0) {
+        notesHtml = notes.map(note => `
+          <div class="timeline-item">
+            <div class="timeline-icon">📝</div>
+            <div class="timeline-content">
+              <div class="timeline-text">${escapeHtml(note.text)}</div>
+              <div class="timeline-meta">
+                <span class="timeline-author">${escapeHtml(note.author)}</span>
+                <span class="timeline-date">${escapeHtml(note.date || 'Kein Datum')}</span>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        notesHtml = `<div class="empty-notes">Keine Notizen vorhanden</div>`;
+      }
+      
+      let activitiesHtml = '';
+      if (activities && activities.length > 0) {
+        activitiesHtml = activities.map(activity => `
+          <div class="timeline-item">
+            <div class="timeline-icon">📋</div>
+            <div class="timeline-content">
+              <div class="timeline-text">${escapeHtml(activity.text)}</div>
+              <div class="timeline-meta">
+                <span class="timeline-author">${escapeHtml(activity.by)}</span>
+                <span class="timeline-date">${escapeHtml(activity.at || 'Kein Datum')}</span>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        activitiesHtml = `<div class="empty-activities">Keine Aktivitäten vorhanden</div>`;
+      }
+      
       contentEl.innerHTML = `
         <div class="k-view-section">
           <h4>Kontaktinformationen</h4>
@@ -770,23 +908,76 @@ const kundenPage = (function () {
           <div class="k-detail-row"><div class="k-detail-label">Wunsch Farbe</div><div class="k-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Dachneigung Grad</div><div class="k-detail-value">${escapeHtml(lead.dachneigung || "—")}</div></div>
         </div>
+        
+        <div class="k-view-section">
+          <h4>📝 Notiz anzeigen</h4>
+          <div class="timeline-container">
+            ${notesHtml}
+          </div>
+        </div>
+        
+        <div class="k-view-section">
+          <h4>⏱️ Aktivitätszeitleiste</h4>
+          <div class="timeline-container">
+            ${activitiesHtml}
+          </div>
+        </div>
       `;
     }
     const modal = document.getElementById("kundenViewModal");
     if (modal) modal.classList.add("active");
   };
 
-  window.callKunde = (id) => {
+  window.callKunde = async (id) => {
     const lead = leadsData.find((l) => l.id === id);
     if (lead && lead.telefon) {
-      alert(`Anruf wird gestartet: ${lead.telefon}`);
-      // window.location.href = `tel:${lead.telefon}`;
+      let phoneNumber = String(lead.telefon).replace(/[\s\-\(\)]/g, '');
+      
+      if (phoneNumber.startsWith('0') && !phoneNumber.startsWith('+')) {
+        phoneNumber = '+49' + phoneNumber.substring(1);
+      } else if (!phoneNumber.startsWith('+') && !phoneNumber.startsWith('00')) {
+        phoneNumber = '+49' + phoneNumber;
+      }
+      
+      const baseUrl = "https://msdach.3cx.eu:5001/webclient/#/call";
+      const callUrl = `${baseUrl}?phone=${encodeURIComponent(phoneNumber)}`;
+      
+      console.log(`📞 Calling ${lead.name} (ID: ${lead.id}) at ${phoneNumber}`);
+      console.log(`🔗 Opening 3CX: ${callUrl}`);
+      
+      window.open(callUrl, "_blank");
+      
+      try {
+        const activityData = {
+          lead_id: lead.id,
+          lead_name: lead.name,
+          action: "call_initiated",
+          phone: lead.telefon,
+          phone_formatted: phoneNumber,
+          timestamp: new Date().toISOString(),
+          user: lead.bearbeiter || "current_user",
+          source: "kunden_page_phone_icon"
+        };
+        
+        console.log("✅ Call logged:", activityData);
+      } catch (err) {
+        console.warn("⚠️ Failed to log call activity:", err.message);
+      }
+      
     } else {
-      alert("Keine Telefonnummer vorhanden");
+      alert("Keine Telefonnummer vorhanden für diesen Kunden.");
     }
   };
 
-  window.delegateKunde = (id) => alert(`Lead ${id} delegieren`);
+  window.sendEmailToKunde = (id) => {
+    const lead = leadsData.find((l) => l.id === id);
+    if (lead && lead.email) {
+      alert(`E-Mail wird gesendet an: ${lead.email}`);
+    } else {
+      alert("Keine E-Mail Adresse vorhanden");
+    }
+  };
+
   window.openKarte = (id) => {
     const lead = leadsData.find((l) => l.id === id);
     if (lead && (lead.strasse || lead.ort)) {
@@ -800,18 +991,8 @@ const kundenPage = (function () {
     }
   };
 
-  window.toggleDelegate = (id, el) => {
-    const on = el.dataset.on === "true";
-    el.dataset.on = String(!on);
-    el.style.background = !on ? "#22c55e" : "#e2e8f0";
-    const slider = el.querySelector("div");
-    if (slider) slider.style.left = !on ? "22px" : "2px";
-    console.log(`Delegate lead ${id}: ${!on ? "assigned" : "unassigned"}`);
-  };
-
   window.openMassEmailModal = openMassEmailModal;
 
-  // ── Status modal save ─────────────────────────────────────────────────────
   function saveStatusUpdate() {
     const newStatus = document.getElementById("statusModalSelect")?.value;
     if (!newStatus) {
@@ -831,7 +1012,6 @@ const kundenPage = (function () {
     renderKunden();
   }
 
-  // ── Add styles (same as before) ──────────────────────────────────────────
   function addKundenStyles() {
     if (document.getElementById("kunden-styles")) return;
     const s = document.createElement("style");
@@ -853,9 +1033,17 @@ const kundenPage = (function () {
       .kstat-multi-row span:last-child { font-weight: 600; color: #0f172a; }
       .active-filter-pill { display: inline-flex; align-items: center; gap: 8px; background: #f0fdf4; padding: 8px 16px; border-radius: 40px; font-size: 0.85rem; color: #166534; margin-bottom: 16px; }
       .active-filter-pill button { background: none; border: none; cursor: pointer; font-size: 1rem; color: #166534; padding: 0 4px; }
+      .filter-section { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; align-items: flex-end; }
+      .filter-group { display: flex; flex-direction: column; gap: 6px; }
+      .filter-group label { font-size: 0.75rem; font-weight: 500; color: #64748b; }
+      .filter-group select, .filter-group input { padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem; background: white; min-width: 180px; }
+      .filter-group select:focus, .filter-group input:focus { outline: none; border-color: #22c55e; }
+      .filter-actions { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+      .reset-filter-btn { background: #f1f5f9; border: 1px solid #e2e8f0; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; color: #475569; transition: all 0.2s; }
+      .reset-filter-btn:hover { background: #e2e8f0; }
       .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
-      .search-box { display: flex; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 40px; padding: 8px 16px; gap: 8px; }
-      .search-box input { border: none; outline: none; font-size: 0.85rem; width: 220px; height: 30px; }
+      .search-box { display: flex; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 40px; padding: 8px 16px; gap: 8px; flex: 1; max-width: 300px; }
+      .search-box input { border: none; outline: none; font-size: 0.85rem; width: 100%; height: 30px; }
       .spacer { flex: 1; }
       .table-label { margin: 8px 0 16px; font-size: 0.85rem; color: #64748b; }
       .mass-email-btn {
@@ -872,12 +1060,8 @@ const kundenPage = (function () {
         cursor: pointer;
         transition: background 0.2s;
       }
-      .mass-email-btn:hover {
-        background: #16a34a;
-      }
-      .mass-email-btn svg {
-        stroke: white;
-      }
+      .mass-email-btn:hover { background: #16a34a; }
+      .mass-email-btn svg { stroke: white; }
       .table-wrap { overflow-x: auto; background: white; border-radius: 16px; border: 1px solid #eef2f8; }
       #kunden-table { width: 100%; border-collapse: collapse; min-width: 1300px; }
       #kunden-table th { text-align: left; padding: 13px 10px; background: #f8fafc; color: #475569; font-weight: 600; font-size: 0.78rem; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
@@ -900,6 +1084,8 @@ const kundenPage = (function () {
       .act-btn:hover { background: #f1f5f9; color: #3b82f6; }
       .act-btn-green { background: #22c55e; border: none; cursor: pointer; padding: 7px 9px; border-radius: 9px; color: white; display: inline-flex; align-items: center; justify-content: center; }
       .act-btn-green:hover { background: #16a34a; }
+      .act-btn-email { background: #3b82f6; border: none; cursor: pointer; padding: 7px 9px; border-radius: 9px; color: white; display: inline-flex; align-items: center; justify-content: center; }
+      .act-btn-email:hover { background: #2563eb; }
       .act-btn-outline { background: none; border: 1.5px solid #e2e8f0; cursor: pointer; padding: 5px 7px; border-radius: 7px; color: #94a3b8; display: inline-flex; align-items: center; justify-content: center; }
       .act-btn-green-outline { background: none; border: 1.5px solid #22c55e; cursor: pointer; padding: 5px 7px; border-radius: 7px; color: #22c55e; display: inline-flex; align-items: center; justify-content: center; }
       .bearbeiten-cell { display: flex; align-items: center; gap: 6px; }
@@ -913,15 +1099,15 @@ const kundenPage = (function () {
       .expand-item { display: flex; flex-direction: column; }
       .expand-item label { font-size: 0.7rem; color: #64748b; margin-bottom: 3px; }
       .expand-item span { font-size: 0.83rem; font-weight: 500; color: #0f172a; }
-      .k-modal-overlay { display: none; position: fixed; z-index:9999; inset: 0; background: rgba(0,0,0,0.45);  justify-content: center; align-items: center; }
+      .k-modal-overlay { display: none; position: fixed; z-index:9999; inset: 0; background: rgba(0,0,0,0.45); justify-content: center; align-items: center; }
       .k-modal-overlay.active { display: flex; }
-      .k-modal-content { background: white; border-radius: 20px; width: 90%; max-width: 580px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: kmodalIn 0.2s ease; }
+      .k-modal-content { background: white; border-radius: 20px; width: 90%; max-width: 650px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: kmodalIn 0.2s ease; }
       .k-modal-sm { max-width: 460px; }
       @keyframes kmodalIn { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: translateY(0); } }
       .k-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
       .k-modal-header h3 { font-size: 1.2rem; font-weight: 700; margin: 0; color: #0f172a; }
       .k-close-btn { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: #94a3b8; line-height: 1; }
-      .k-modal-body { flex: 1; overflow-y: auto; padding: 20px 24px 24px; }
+      .k-modal-body { flex: 1; overflow-y: auto; padding: 24px; }
       .k-full-select { width: 100%; padding: 11px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 0.9rem; background: white; color: #64748b; }
       .k-full-input { width: 100%; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem; font-family: inherit; }
       .k-full-input:focus { outline: none; border-color: #22c55e; }
@@ -935,24 +1121,56 @@ const kundenPage = (function () {
       .k-detail-label { width: 150px; font-weight: 500; color: #64748b; font-size: 0.83rem; flex-shrink: 0; }
       .k-detail-value { flex: 1; color: #0f172a; font-size: 0.83rem; }
       .empty-state { text-align: center; padding: 40px; color: #94a3b8; font-size: 0.9rem; }
-      @media (max-width: 768px) { .expand-grid { grid-template-columns: repeat(2, 1fr); } .k-modal-content { width: 96%; } }
+      .empty-notes, .empty-activities { text-align: center; padding: 20px; color: #94a3b8; font-size: 0.85rem; background: #f8fafc; border-radius: 8px; }
+      .timeline-container { max-height: 300px; overflow-y: auto; }
+      .timeline-item { display: flex; gap: 12px; padding: 12px; border-bottom: 1px solid #f1f5f9; }
+      .timeline-icon { width: 32px; height: 32px; background: #f1f5f9; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+      .timeline-content { flex: 1; }
+      .timeline-text { font-size: 0.85rem; color: #0f172a; margin-bottom: 4px; }
+      .timeline-meta { display: flex; gap: 12px; font-size: 0.7rem; color: #64748b; }
+      .timeline-author { font-weight: 500; }
+      .timeline-date { color: #94a3b8; }
+      @media (max-width: 768px) { .expand-grid { grid-template-columns: repeat(2, 1fr); } .k-modal-content { width: 96%; } .filter-section { flex-direction: column; align-items: stretch; } .filter-group select, .filter-group input { width: 100%; } .filter-actions { margin-left: 0; } }
     `;
     document.head.appendChild(s);
   }
 
-  // ── HTML template ─────────────────────────────────────────────────────────
   function getHTML() {
     return `
       <div class="kunden-container">
         <div class="page-title">Meine Kunden</div>
         <div class="kunden-stats" id="kunden-stats"></div>
         <div id="kunden-filter-pill" style="display:none"></div>
+        
+        <!-- Filter Section -->
+        <div class="filter-section">
+          <div class="filter-group">
+            <label>Status</label>
+            <select id="filter-status" onchange="window.applyFilters()">
+              <option value="">Alle Status</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Lead Quelle</label>
+            <select id="filter-source" onchange="window.applyFilters()">
+              <option value="">Alle Quellen</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Ort</label>
+            <input type="text" id="filter-ort" placeholder="Ort suchen..." oninput="window.applyFilters()" />
+          </div>
+          <div class="filter-actions">
+            <button class="reset-filter-btn" onclick="window.resetFilters()">Filter zurücksetzen</button>
+          </div>
+        </div>
+        
         <div class="toolbar">
           <div class="search-box">
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input type="text" placeholder="Suche..." id="kunden-search"/>
+            <input type="text" placeholder="Name oder Ort suchen..." id="kunden-search"/>
           </div>
           <div class="spacer"></div>
           <button id="mass-email-btn" class="mass-email-btn" onclick="window.openMassEmailModal()" style="display: none;">
@@ -979,7 +1197,7 @@ const kundenPage = (function () {
                 <th>Summe Netto</th>
                 <th>Datum</th>
                 <th>Sicht</th>
-                <th>Anruf</th>
+                <th>Aktionen</th>
                 <th>Bearbeiten</th>
                 <th>Karte</th>
               </tr>
@@ -1027,7 +1245,6 @@ const kundenPage = (function () {
     `;
   }
 
-  // ── Init ──────────────────────────────────────────────────────────────────
   function init(contentEl, titleElement) {
     contentArea = contentEl;
     titleEl = titleElement;
@@ -1041,15 +1258,20 @@ const kundenPage = (function () {
     if (!contentArea) return;
     contentArea.innerHTML = getHTML();
 
-    // Load data from APIs
     loadAllData();
 
-    // Search input listener
+    // Expose filter functions globally
+    window.applyFilters = () => {
+      applyFilters();
+    };
+    window.resetFilters = () => {
+      resetFilters();
+    };
+
     document.getElementById("kunden-search")?.addEventListener("input", () => {
       renderKunden();
     });
 
-    // Check-all checkbox
     document
       .getElementById("kunden-check-all")
       ?.addEventListener("change", (e) => {
@@ -1063,7 +1285,6 @@ const kundenPage = (function () {
         updateMassEmailButton();
       });
 
-    // View modal close
     document
       .getElementById("closeKundenViewModal")
       ?.addEventListener("click", () => {
@@ -1078,7 +1299,6 @@ const kundenPage = (function () {
             ?.classList.remove("active");
       });
 
-    // Status modal close
     document
       .getElementById("closeStatusModal")
       ?.addEventListener("click", () => {
@@ -1089,18 +1309,16 @@ const kundenPage = (function () {
         document.getElementById("statusModal")?.classList.remove("active");
     });
 
-    // Status modal save
     document
       .getElementById("statusModalSaveBtn")
       ?.addEventListener("click", saveStatusUpdate);
 
-    console.log("✅ Kunden page loaded with real API data and mass email feature");
+    console.log("✅ Kunden page loaded with filters and 3CX phone integration");
   }
 
   return { init };
 })();
 
 window.kundenPage = kundenPage;
-// Alias for English route naming
 window.customersPage = window.kundenPage;
-console.log("kunden.js loaded - window.kundenPage exists:", !!window.kundenPage);
+console.log("kunden.js loaded - window.kundenPage exists with filters and 3CX phone integration");

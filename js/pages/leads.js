@@ -21,10 +21,15 @@ const leadsPage = (function () {
   // Store full dataset for client-side pagination
   let fullLeadsData = [];
 
+  // Optimistic cache until reload
+  let pendingCreates = []; // Array of temp leads (ids are negative)
+  let pendingUpdates = new Map(); // Map<id:string, partialLead>
+
   // Current filters
   let currentSearch = "";
   let currentStatus = "";
   let currentQuelle = "";
+  let currentBearbeiter = "";  // Add this line
 
   // ─────────────────────────────────────────────
   // HTML TEMPLATE
@@ -77,6 +82,13 @@ const leadsPage = (function () {
           <option value="Flyer">Flyer</option>
           <option value="Solar">Solar</option>
         </select>
+        <select class="select-box" id="filter-bearbeiter">
+          <option value="">Alle Bearbeiter</option>
+          <option value="Philipp">Philipp</option>
+          <option value="André">André</option>
+          <option value="Martin">Martin</option>
+          <option value="Simon">Simon</option>
+          </select>
         <div class="spacer"></div>
         <button class="btn-primary" id="new-lead-btn">
           <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -226,7 +238,7 @@ const leadsPage = (function () {
             <div class="form-group"><label>Dachneigung Grad</label>
             <select id="editDachneigung">
             <option value="">Wählen...</option>
-            <option value="0-10">0-15°</option>
+            <option value="0-15°">0-15°</option>
             <option value="15-25°">15-25°</option>
             <option value="25-45°">25-45°</option>
             <option value="45-55°">45-55°</option>
@@ -355,7 +367,7 @@ const leadsPage = (function () {
         </div>
         <div class="modal-body">
           <div class="form-group">
-            <label>Dropdown</label>
+            <label>Vorlage</label>
             <select id="emailTemplateSelect" class="k-full-select">
               <option value="">Choose an E-Mail</option>
               <option value="E1">E1</option>
@@ -371,8 +383,12 @@ const leadsPage = (function () {
             </select>
           </div>
           <div class="form-group">
-            <label>Textbox</label>
+            <label>Name</label>
             <input type="text" id="emailSubjectInput" placeholder="Name" class="k-full-select">
+          </div>
+          <div class="form-group">
+            <label>E-Mail</label>
+            <input type="email" id="massEmailAddressInput" placeholder="E-Mail" class="k-full-select">
           </div>
           <div style="text-align:right; margin-top:20px;">
             <button id="sendMassEmailBtn" class="k-btn-green">E-Mail senden</button>
@@ -628,8 +644,8 @@ const leadsPage = (function () {
   // ─────────────────────────────────────────────
   function addToastStyles() {
     if (document.getElementById("toast-styles")) return;
-    const s = document.createElement('style');
-    s.id = 'toast-styles';
+    const s = document.createElement("style");
+    s.id = "toast-styles";
     s.textContent = `
       .toast-container { position: fixed; top: 16px; right: 16px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
       .toast { min-width: 280px; max-width: 380px; padding: 12px 14px; border-radius: 10px; color: #0f172a; background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 10px 30px rgba(0,0,0,0.08); font-size: 0.9rem; display: grid; grid-template-columns: 6px 1fr auto; align-items: center; gap: 12px; opacity: 0; transform: translateX(16px); animation: toastIn 200ms ease forwards; pointer-events: auto; position: relative; overflow: hidden; }
@@ -654,34 +670,34 @@ const leadsPage = (function () {
   }
 
   function ensureToastContainer() {
-    let c = document.getElementById('toast-container');
+    let c = document.getElementById("toast-container");
     if (!c) {
-      c = document.createElement('div');
-      c.id = 'toast-container';
-      c.className = 'toast-container';
+      c = document.createElement("div");
+      c.id = "toast-container";
+      c.className = "toast-container";
       document.body.appendChild(c);
     }
     return c;
   }
 
-  function showToast(message, type = 'success', duration = 2500) {
+  function showToast(message, type = "success", duration = 2500) {
     addToastStyles();
     const container = ensureToastContainer();
-    const el = document.createElement('div');
+    const el = document.createElement("div");
     el.className = `toast toast-${type}`;
-    el.setAttribute('role','status');
-    el.setAttribute('aria-live','polite');
-    const accent = document.createElement('div');
-    accent.className = 'toast-accent';
-    const content = document.createElement('div');
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
+    const accent = document.createElement("div");
+    accent.className = "toast-accent";
+    const content = document.createElement("div");
     content.textContent = message;
-    const close = document.createElement('button');
-    close.className = 'toast-close';
-    close.setAttribute('aria-label','Schließen');
-    close.textContent = '×';
-    const progress = document.createElement('div');
-    progress.className = 'toast-progress';
-    const bar = document.createElement('div');
+    const close = document.createElement("button");
+    close.className = "toast-close";
+    close.setAttribute("aria-label", "Schließen");
+    close.textContent = "×";
+    const progress = document.createElement("div");
+    progress.className = "toast-progress";
+    const bar = document.createElement("div");
     progress.appendChild(bar);
     el.appendChild(accent);
     el.appendChild(content);
@@ -703,13 +719,24 @@ const leadsPage = (function () {
     };
     const hide = () => {
       stopped = true;
-      el.style.animation = 'toastOut 180ms ease forwards';
+      el.style.animation = "toastOut 180ms ease forwards";
       setTimeout(() => el.remove(), 200);
     };
     let rafId = requestAnimationFrame(tick);
-    close.addEventListener('click', hide);
-    el.addEventListener('mouseenter', () => { stopped = true; });
-    el.addEventListener('mouseleave', () => { if (bar.style.transform) { start = performance.now() - (duration * (1 - parseFloat(bar.style.transform.replace('scaleX(','')))); stopped = false; rafId = requestAnimationFrame(tick); } });
+    close.addEventListener("click", hide);
+    el.addEventListener("mouseenter", () => {
+      stopped = true;
+    });
+    el.addEventListener("mouseleave", () => {
+      if (bar.style.transform) {
+        start =
+          performance.now() -
+          duration *
+            (1 - parseFloat(bar.style.transform.replace("scaleX(", "")));
+        stopped = false;
+        rafId = requestAnimationFrame(tick);
+      }
+    });
     return { hide };
   }
 
@@ -742,39 +769,57 @@ const leadsPage = (function () {
       lead_id: leadId,
       activity_type: activityType,
       activity_text: activityText,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
-    
+
     try {
       // Try same-origin API first
       const res = await fetch(INSERT_ACTIVITY_API, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (data && (data.status === "success" || data.success === true)) return data;
+      if (data && (data.status === "success" || data.success === true))
+        return data;
       return data;
     } catch (err) {
-      console.warn("Activity insert via same-origin failed, trying direct...", err.message);
-      
+      console.warn(
+        "Activity insert via same-origin failed, trying direct...",
+        err.message,
+      );
+
       // Try direct endpoint as fallback
       try {
         const params = new URLSearchParams();
-        Object.entries(payload).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
+        Object.entries(payload).forEach(([k, v]) => {
+          if (v !== undefined && v !== null) params.append(k, String(v));
+        });
         const res = await fetch(INSERT_ACTIVITY_DIRECT, {
           method: "POST",
-          headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
           body: params,
           mode: "cors",
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
-        try { return JSON.parse(text); } catch { return { status: "success", raw: text }; }
+        try {
+          return JSON.parse(text);
+        } catch {
+          return { status: "success", raw: text };
+        }
       } catch (directErr) {
         console.error("Activity insert failed:", directErr);
-        throw new Error(`Aktivität konnte nicht gespeichert werden: ${directErr.message}`);
+        throw new Error(
+          `Aktivität konnte nicht gespeichert werden: ${directErr.message}`,
+        );
       }
     }
   }
@@ -788,40 +833,43 @@ const leadsPage = (function () {
       showToast("Lead nicht gefunden", "error", 2000);
       return;
     }
-    
+
     const phoneNumber = lead.telefon;
     const leadName = `${lead.salutation ? lead.salutation + " " : ""}${lead.name}`;
-    
+
     // Check if phone number is empty
     if (!phoneNumber || phoneNumber.trim() === "") {
       showToast(`Keine Telefonnummer für ${leadName} vorhanden`, "error", 3000);
       return;
     }
-    
+
     // Clean phone number - remove spaces, dashes, etc.
     const cleanPhone = phoneNumber.replace(/[\s\-\(\)]/g, "");
-    
+
     // Build 3CX Web Client URL
     const baseUrl = "https://msdach.3cx.eu:5001/webclient/#/call";
     const callUrl = `${baseUrl}?phone=${encodeURIComponent(cleanPhone)}`;
-    
+
     try {
       // Record activity in backend
       const activityText = `Anruf gestartet zu ${leadName} (${phoneNumber})`;
       await insertActivity(leadId, "call", activityText);
       console.log(`Activity recorded for lead ${leadId}: ${activityText}`);
-      
+
       // Open 3CX Web Client
       window.open(callUrl, "_blank");
-      
+
       // Show success toast
       showToast(`Anruf wird gestartet: ${phoneNumber}`, "success", 3000);
-      
     } catch (error) {
       console.error("Failed to record call activity:", error);
       // Still open the call even if activity recording fails
       window.open(callUrl, "_blank");
-      showToast(`Anruf wird gestartet (Aktivität nicht gespeichert): ${phoneNumber}`, "info", 3000);
+      showToast(
+        `Anruf wird gestartet (Aktivität nicht gespeichert): ${phoneNumber}`,
+        "info",
+        3000,
+      );
     }
   }
 
@@ -830,7 +878,8 @@ const leadsPage = (function () {
   // ─────────────────────────────────────────────
   async function refreshLeads() {
     const tbody = document.getElementById("leads-tbody");
-    if (tbody) tbody.innerHTML = `</table><td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div></td>`;
+    if (tbody)
+      tbody.innerHTML = `</table><td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div></td>`;
     fullLeadsData = [];
     expandedRows.clear();
     selectedLeads.clear();
@@ -841,8 +890,13 @@ const leadsPage = (function () {
   // Poll a few times to surface the new data sooner.
   function schedulePostCreateSync() {
     // Immediate refresh already happens; also refresh at 10s and 20s
-    setTimeout(() => { refreshLeads(); }, 10000);
-    setTimeout(() => { refreshLeads(); showToast('Leads aktualisiert', 'info', 1500); }, 20000);
+    setTimeout(() => {
+      refreshLeads();
+    }, 10000);
+    setTimeout(() => {
+      refreshLeads();
+      showToast("Leads aktualisiert", "info", 1500);
+    }, 20000);
   }
 
   function formatNumber(num) {
@@ -851,6 +905,36 @@ const leadsPage = (function () {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
+  }
+
+  // Lightweight identity to dedupe pending creates once upstream reflects them
+  function leadKey(lead) {
+    return [lead.name || "", lead.email || "", lead.telefon || ""]
+      .map((s) => String(s).trim().toLowerCase())
+      .join("|");
+  }
+
+  function euro(amount) {
+    const raw = parseFloat(amount) || 0;
+    return `$ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`;
+  }
+
+  function applyPendingUpdates(list) {
+    return list.map((l) => {
+      const upd = pendingUpdates.get(String(l.id));
+      if (!upd) return l;
+      const merged = { ...l, ...upd };
+      if (upd.status) merged.statusClass = getStatusClass(upd.status);
+      if (upd.summe != null) merged.summe = euro(upd.summe);
+      return merged;
+    });
+  }
+
+  function mergeAfterFetch(baseList) {
+    const withUpdates = applyPendingUpdates(baseList);
+    const serverKeys = new Set(withUpdates.map(leadKey));
+    const creates = pendingCreates.filter((pc) => !serverKeys.has(leadKey(pc)));
+    return [...creates, ...withUpdates];
   }
 
   function getStatusClass(status) {
@@ -923,13 +1007,48 @@ const leadsPage = (function () {
   // ─────────────────────────────────────────────
   const EXTERNAL_API_URL = "https://goarrow.ai/test/fetch_lead.php";
   const INSERT_API_DIRECT = "https://goarrow.ai/test/insert_lead.php";
-  const INSERT_API_SAME   = "/api/insert_lead";
+  const INSERT_API_SAME = "/api/insert_lead";
   const UPDATE_API_DIRECT = "https://goarrow.ai/test/update_lead.php";
-  const UPDATE_API_SAME   = "/api/update_lead";
-  const NOTES_FETCH_SAME  = "/api/lead_notes";
+  const UPDATE_API_SAME = "/api/update_lead";
+  const NOTES_FETCH_SAME = "/api/lead_notes";
   const NOTES_INSERT_SAME = "/api/insert_lead_note";
   const ACTIVITY_FETCH_SAME = "/api/lead_activity";
   const SAME_ORIGIN_API = "/api/leads";
+
+  // ─────────────────────────────────────────────
+  // ERROR HELPERS (friendlier messages)
+  // ─────────────────────────────────────────────
+  function stripHtml(text) {
+    if (!text) return "";
+    try {
+      return String(text)
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    } catch {
+      return String(text);
+    }
+  }
+
+  function friendlyApiError(context, raw) {
+    const msg = (raw || "").toString();
+    const isStaticLocal =
+      typeof location !== "undefined" &&
+      location.host.includes("localhost:5500");
+    if (isStaticLocal && /501|Unsupported method|404/.test(msg)) {
+      return `${context}: Lokaler Static-Server unterstützt /api nicht. Bitte 'vercel dev' starten oder über Proxy testen.`;
+    }
+    if (/CORS|Access-Control-Allow-Origin/.test(msg)) {
+      return `${context}: Vom Browser blockiert (CORS). Nutzen Sie die gleichen /api Routen (Vercel/vercel dev).`;
+    }
+    if (/400|Bad Request/.test(msg)) {
+      return `${context}: Backend hat 400 zurückgegeben. Prüfen Sie Pflichtfelder (lead_id, status, summe_netto).`;
+    }
+    if (/Failed to fetch/.test(msg)) {
+      return `${context}: Netzwerk-/CORS-Problem. Bitte erneut versuchen oder vercel dev nutzen.`;
+    }
+    return `${context}: ${msg}`;
+  }
 
   async function fetchViaProxy(proxyUrl) {
     const res = await fetch(proxyUrl, {
@@ -1007,93 +1126,180 @@ const leadsPage = (function () {
     try {
       const res = await fetch(INSERT_API_SAME, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (data && (data.status === "success" || data.success === true)) return data;
+      if (data && (data.status === "success" || data.success === true))
+        return data;
       // If unknown shape but exists, still return it
       if (data) return data;
       throw new Error("Invalid response format");
     } catch (err) {
-      console.warn("Create via same-origin failed, trying direct (may hit CORS locally)", err.message);
+      console.warn(
+        "Create via same-origin failed, trying direct (may hit CORS locally)",
+        err.message,
+      );
     }
 
     // 2) Direct to external (will likely be blocked by CORS in browser locally)
     try {
       const params = new URLSearchParams();
-      Object.entries(payload).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
+      Object.entries(payload).forEach(([k, v]) => {
+        if (v !== undefined && v !== null) params.append(k, String(v));
+      });
       const res = await fetch(INSERT_API_DIRECT, {
         method: "POST",
-        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
         body: params,
         mode: "cors",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
-      try { return JSON.parse(text); } catch { return { status: "success", raw: text }; }
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { status: "success", raw: text };
+      }
     } catch (err) {
-      throw new Error(`Lead konnte nicht erstellt werden: ${err.message}`);
+      console.warn("Direct create failed:", err.message);
+      // 3) Proxy fallback for local static
+      try {
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_API_DIRECT)}`;
+        const params = new URLSearchParams();
+        Object.entries(payload).forEach(([k, v]) => {
+          if (v !== undefined && v !== null) params.append(k, String(v));
+        });
+        const res = await fetch(proxyUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          return { status: "success", raw: text };
+        }
+      } catch (proxyErr) {
+        throw new Error(
+          friendlyApiError("Erstellen fehlgeschlagen", proxyErr.message),
+        );
+      }
     }
   }
 
-  async function updateLeadOnAPI(id, payload) {
-    const body = { id, ...payload };
-    try {
-      const res = await fetch(UPDATE_API_SAME, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (data && (data.status === "success" || data.success === true)) return data;
-      if (data) return data;
-      throw new Error("Invalid response format");
-    } catch (err) {
-      console.warn("Update via same-origin failed, trying direct (may hit CORS locally)", err.message);
+async function updateLeadOnAPI(id, payload) {
+  // Map your frontend field names to PHP API field names
+  const mappedPayload = {
+    id: String(id),
+    status: payload.status,
+    sale_type: payload.sale_typ,
+    bearbeiter: payload.bearbeiter,
+    name: payload.name,
+    salutation: payload.salutation,
+    erstberatung_telefon: payload.erstberatung_telefon,
+    strasse_objekt: payload.strasse_objekt,
+    angebot: payload.angebot,
+    plz: payload.plz,
+    ort: payload.ort,
+    telefon: payload.telefon,
+    email: payload.email,
+    einschaetzung_kunde: payload.einschaetzung_kunde,
+    lead_quelle: payload.lead_quelle,
+    kontakt_via: payload.kontakt_via,
+    datum: payload.datum,
+    nachfassen: payload.nachfassen,
+    summe_netto: payload.summe_netto,
+    dachflaeche_m2: payload.dachflaeche_m2,
+    dachneigung_grad: payload.dachneigung_grad,
+    dacheindeckung: payload.dacheindeckung,
+    wunsch_farbe: payload.wunsch_farbe,
+    dachpfanne: payload.dachpfanne,
+    baujahr_dach: payload.baujahr_dach,
+    zusaetzliche_extras: payload.zusaetzliche_extras,
+  };
+
+  // Remove undefined values
+  Object.keys(mappedPayload).forEach(key => {
+    if (mappedPayload[key] === undefined || mappedPayload[key] === null) {
+      delete mappedPayload[key];
     }
-    try {
-      const params = new URLSearchParams();
-      Object.entries(body).forEach(([k, v]) => { if (v !== undefined && v !== null) params.append(k, String(v)); });
-      const res = await fetch(UPDATE_API_DIRECT, {
-        method: "POST",
-        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-        body: params,
-        mode: "cors",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      try { return JSON.parse(text); } catch { return { status: "success", raw: text }; }
-    } catch (err) {
-      throw new Error(`Lead konnte nicht aktualisiert werden: ${err.message}`);
+  });
+
+  console.log('Sending update payload:', mappedPayload);
+
+  try {
+    // Use your Node.js handler as a proxy (NO CORS ISSUE)
+    const response = await fetch('/api/update_lead', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(mappedPayload), // Send as JSON
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
+
+    const data = await response.json();
+    console.log('Update response:', data);
+    return data;
+    
+  } catch (error) {
+    console.error('Update failed:', error);
+    throw new Error(`Update failed: ${error.message}`);
   }
+}
 
   function showLeadsLoadError(message) {
     const tbody = document.getElementById("leads-tbody");
     if (!tbody) return;
     tbody.innerHTML = `<td colspan="15"><div class="empty-state error-state">⚠️ ${message}</div></td>`;
   }
-  
+
   // ─────────────────────────────────────────────
   // NOTES API HELPERS
   // ─────────────────────────────────────────────
   async function fetchNotesForLead(leadId) {
     // 1) Same-origin on Vercel
     try {
-      const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`, { headers: { Accept: 'application/json' } });
+      const res = await fetch(
+        `${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`,
+        { headers: { Accept: "application/json" } },
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const list = Array.isArray(data) ? data : (data.data || data.notes || []);
-      const normalized = (list || []).map(n => ({ text: String(n.text || n.note || n.message || ''), author: String(n.author || n.user || 'Created at'), date: String(n.date || n.created_at || '') }));
+      const list = Array.isArray(data) ? data : data.data || data.notes || [];
+      const normalized = (list || []).map((n) => ({
+        text: String(n.text || n.note || n.message || ""),
+        author: String(n.author || n.user || "Created at"),
+        date: String(n.date || n.created_at || ""),
+      }));
       notesCache.set(String(leadId), normalized);
-      const idx = fullLeadsData.findIndex(l => String(l.id) === String(leadId));
+      const idx = fullLeadsData.findIndex(
+        (l) => String(l.id) === String(leadId),
+      );
       if (idx !== -1) fullLeadsData[idx].notes = normalized;
       return normalized;
     } catch (err) {
-      console.warn('Same-origin notes fetch failed, trying proxies:', err.message);
+      console.warn(
+        "Same-origin notes fetch failed, trying proxies:",
+        err.message,
+      );
     }
     // 2) Proxy fallback for local testing
     const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}`;
@@ -1103,17 +1309,23 @@ const leadsPage = (function () {
     ];
     for (const url of proxies) {
       try {
-        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        const r = await fetch(url, { headers: { Accept: "application/json" } });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
-        const list = Array.isArray(data) ? data : (data.data || data.notes || []);
-        const normalized = (list || []).map(n => ({ text: String(n.text || n.note || n.message || ''), author: String(n.author || n.user || 'System'), date: String(n.date || n.created_at || '') }));
+        const list = Array.isArray(data) ? data : data.data || data.notes || [];
+        const normalized = (list || []).map((n) => ({
+          text: String(n.text || n.note || n.message || ""),
+          author: String(n.author || n.user || "System"),
+          date: String(n.date || n.created_at || ""),
+        }));
         notesCache.set(String(leadId), normalized);
-        const idx = fullLeadsData.findIndex(l => String(l.id) === String(leadId));
+        const idx = fullLeadsData.findIndex(
+          (l) => String(l.id) === String(leadId),
+        );
         if (idx !== -1) fullLeadsData[idx].notes = normalized;
         return normalized;
       } catch (e) {
-        console.warn('Notes proxy failed:', url, e.message);
+        console.warn("Notes proxy failed:", url, e.message);
       }
     }
     return [];
@@ -1123,9 +1335,12 @@ const leadsPage = (function () {
     const body = { lead_id: leadId, note: text, text };
     try {
       const res = await fetch(NOTES_INSERT_SAME, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(body)
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -1141,39 +1356,71 @@ const leadsPage = (function () {
   async function fetchActivityForLead(leadId) {
     // Normalizer tolerant to different API field names
     const normalize = (a) => {
-      const text = a.text || a.activity || a.action || a.event || a.message || a.desc || a.description || '';
-      const by   = a.from || a.by || a.user || a.username || a.author || a.created_by || 'System';
-      let at     = a.at || a.datetime || a.timestamp || a.date_time || a.date || a.created_at || '';
+      const text =
+        a.text ||
+        a.activity ||
+        a.action ||
+        a.event ||
+        a.message ||
+        a.desc ||
+        a.description ||
+        "";
+      const by =
+        a.from ||
+        a.by ||
+        a.user ||
+        a.username ||
+        a.author ||
+        a.created_by ||
+        "System";
+      let at =
+        a.at ||
+        a.datetime ||
+        a.timestamp ||
+        a.date_time ||
+        a.date ||
+        a.created_at ||
+        "";
       if (!at) {
         const d = a.activity_date || a.activityDate || a.date;
         const t = a.activity_time || a.activityTime || a.time;
-        if (d || t) at = `${d || ''}${d && t ? ' ' : ''}${t || ''}`.trim();
+        if (d || t) at = `${d || ""}${d && t ? " " : ""}${t || ""}`.trim();
       }
-      return { text: String(text || ''), by: String(by || 'System'), at: String(at || '') };
+      return {
+        text: String(text || ""),
+        by: String(by || "System"),
+        at: String(at || ""),
+      };
     };
 
     async function tryFetch(url) {
-      const r = await fetch(url, { headers: { Accept: 'application/json' } });
+      const r = await fetch(url, { headers: { Accept: "application/json" } });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
-      console.log('🔎 Activity raw data:', data);
-      const list = Array.isArray(data) ? data : (data.data || data.activity || data.items || []);
+      console.log("🔎 Activity raw data:", data);
+      const list = Array.isArray(data)
+        ? data
+        : data.data || data.activity || data.items || [];
       return (list || []).map(normalize);
     }
 
     // 1) Same-origin first with lead_id, then id
     try {
-      let list = await tryFetch(`${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`);
+      let list = await tryFetch(
+        `${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`,
+      );
       if (!list.length) {
-        list = await tryFetch(`${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`);
+        list = await tryFetch(
+          `${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`,
+        );
       }
       if (list.length) return list;
     } catch (err) {
-      console.warn('Same-origin activity fetch failed:', err.message);
+      console.warn("Same-origin activity fetch failed:", err.message);
     }
 
     // 2) Proxy fallback for local (lead_id then id)
-    const base = 'https://goarrow.ai/test/fetch_activity.php';
+    const base = "https://goarrow.ai/test/fetch_activity.php";
     const targets = [
       `${base}?lead_id=${encodeURIComponent(leadId)}`,
       `${base}?id=${encodeURIComponent(leadId)}`,
@@ -1188,7 +1435,7 @@ const leadsPage = (function () {
           const list = await tryFetch(url);
           if (list.length) return list;
         } catch (e) {
-          console.warn('Activity proxy failed:', url, e.message);
+          console.warn("Activity proxy failed:", url, e.message);
         }
       }
     }
@@ -1216,6 +1463,12 @@ const leadsPage = (function () {
     if (currentQuelle) {
       filtered = filtered.filter((lead) => lead.quelle === currentQuelle);
     }
+    // Add Bearbeiter filter
+    if (currentBearbeiter) {
+      filtered = filtered.filter(
+        (lead) => lead.bearbeiter === currentBearbeiter,
+      );
+    }
 
     return filtered;
   }
@@ -1235,7 +1488,10 @@ const leadsPage = (function () {
       // Only fetch if we don't have data yet
       if (fullLeadsData.length === 0) {
         const result = await fetchLeadsFromAPI();
-        fullLeadsData = result.data.map(mapAPIToLead);
+        fullLeadsData = mergeAfterFetch(result.data.map(mapAPIToLead));
+      } else {
+        // Ensure dataset reflects optimistic cache as well
+        fullLeadsData = mergeAfterFetch(fullLeadsData);
       }
 
       // Apply filters
@@ -1374,10 +1630,10 @@ const leadsPage = (function () {
   function updateMassEmailButtonVisibility() {
     const selectedCountEl = document.getElementById("selected-count");
     if (!selectedCountEl) return;
-    
+
     // Check if button already exists
     let massEmailBtn = document.getElementById("mass-email-btn");
-    
+
     if (selectedLeads.size > 0) {
       if (!massEmailBtn) {
         massEmailBtn = document.createElement("button");
@@ -1409,59 +1665,122 @@ const leadsPage = (function () {
     }
   }
 
-  function openMassEmailModal() {
-    if (selectedLeads.size === 0) {
+  let currentEmailLeadId = null;
+
+  function openMassEmailModal(lead = null) {
+    // If opened for a specific lead (from row action), allow opening without selection
+    // Otherwise require selected leads
+    if (!lead && selectedLeads.size === 0) {
       showToast("Bitte wählen Sie zuerst Leads aus", "error", 2000);
       return;
     }
-    
-    // Reset form
+
+    currentEmailLeadId = lead ? lead.id : null;
+
+    // Reset / prefill form
     const selectEl = document.getElementById("emailTemplateSelect");
-    const subjectEl = document.getElementById("emailSubjectInput");
+    const nameEl = document.getElementById("emailSubjectInput");
+    const emailEl = document.getElementById("massEmailAddressInput");
     if (selectEl) selectEl.value = "";
-    if (subjectEl) subjectEl.value = "";
-    
+    if (lead) {
+      if (nameEl) nameEl.value = lead.name || "";
+      if (emailEl) emailEl.value = lead.email || "";
+      if (nameEl) nameEl.readOnly = true;
+      if (emailEl) emailEl.readOnly = true;
+    } else {
+      // From selection: if exactly one selected, prefill; in all cases keep read-only
+      const list = fullLeadsData.filter((l) => selectedLeads.has(l.id));
+      if (list.length === 1) {
+        const only = list[0];
+        if (nameEl) nameEl.value = only.name || "";
+        if (emailEl) emailEl.value = only.email || "";
+      } else {
+        if (nameEl) nameEl.value = "";
+        if (emailEl) emailEl.value = "";
+      }
+      if (nameEl) nameEl.readOnly = true;
+      if (emailEl) emailEl.readOnly = true;
+    }
+
     const modal = document.getElementById("massEmailModal");
     if (modal) modal.classList.add("active");
   }
 
   function sendMassEmails() {
-    const selectedEmailTemplate = document.getElementById("emailTemplateSelect")?.value;
-    const subjectText = document.getElementById("emailSubjectInput")?.value;
-    
+    const selectedEmailTemplate = document.getElementById(
+      "emailTemplateSelect",
+    )?.value;
+    const subjectText = document.getElementById("emailSubjectInput")?.value; // Name (single mode is read-only)
+    const singleEmail =
+      document.getElementById("massEmailAddressInput")?.value || "";
+
     if (!selectedEmailTemplate) {
       showToast("Bitte wählen Sie eine E-Mail-Vorlage aus", "error", 2000);
       return;
     }
-    
+
     if (!subjectText || subjectText.trim() === "") {
       showToast("Bitte geben Sie einen Betreff/Namen ein", "error", 2000);
       return;
     }
-    
-    // Get selected leads emails
-    const selectedLeadsList = fullLeadsData.filter(lead => selectedLeads.has(lead.id));
-    const leadsWithEmails = selectedLeadsList.filter(lead => lead.email && lead.email.trim() !== "");
-    
+
+    let leadsWithEmails = [];
+    if (currentEmailLeadId != null) {
+      const lead = fullLeadsData.find(
+        (l) => String(l.id) === String(currentEmailLeadId),
+      );
+      const name = (lead?.name || "").trim();
+      const email = (lead?.email || "").trim();
+      if (!email) {
+        showToast("Keine E-Mail-Adresse vorhanden", "error", 2000);
+        return;
+      }
+      leadsWithEmails = [{ name, email }];
+    } else {
+      // Get selected leads emails
+      const selectedLeadsList = fullLeadsData.filter((lead) =>
+        selectedLeads.has(lead.id),
+      );
+      leadsWithEmails = selectedLeadsList.filter(
+        (lead) => lead.email && lead.email.trim() !== "",
+      );
+    }
+
     if (leadsWithEmails.length === 0) {
-      showToast("Keine der ausgewählten Leads hat eine E-Mail-Adresse", "error", 2000);
+      showToast(
+        "Keine der ausgewählten Leads hat eine E-Mail-Adresse",
+        "error",
+        2000,
+      );
       return;
     }
-    
+
     // Close modal first
     document.getElementById("massEmailModal")?.classList.remove("active");
-    
+
     // Show sending status
-    showToast(`Sende E-Mails an ${leadsWithEmails.length} Empfänger...`, "info", 2000);
-    
+    showToast(
+      `Sende E-Mails an ${leadsWithEmails.length} Empfänger...`,
+      "info",
+      2000,
+    );
+
     // Simulate sending emails (replace with actual API call if needed)
     setTimeout(() => {
       console.log(`Mass email sent to ${leadsWithEmails.length} recipients`);
       console.log("Template:", selectedEmailTemplate);
       console.log("Subject:", subjectText);
-      console.log("Recipients:", leadsWithEmails.map(l => ({ name: l.name, email: l.email })));
-      
-      showToast(`✅ ${leadsWithEmails.length} E-Mails wurden gesendet`, "success", 3000);
+      const recipients = leadsWithEmails.map((l) => ({
+        name: l.name,
+        email: l.email,
+      }));
+      console.log("Recipients:", recipients);
+
+      showToast(
+        `✅ ${leadsWithEmails.length} E-Mails wurden gesendet`,
+        "success",
+        3000,
+      );
     }, 500);
   }
 
@@ -1533,6 +1852,8 @@ const leadsPage = (function () {
       document.getElementById("search-input")?.value.toLowerCase().trim() || "";
     currentStatus = document.getElementById("filter-status")?.value || "";
     currentQuelle = document.getElementById("filter-quelle")?.value || "";
+    currentBearbeiter =
+      document.getElementById("filter-bearbeiter")?.value || ""; // Add this line
     currentPage = 1;
     loadPage(1);
   }
@@ -1572,15 +1893,25 @@ const leadsPage = (function () {
   // ─────────────────────────────────────────────
   // PANEL
   // ─────────────────────────────────────────────
-function openPanel(title) {
+  function openPanel(title) {
     console.log("Opening panel:", title); // Add this line
     document.getElementById("editPanelTitle").textContent = title;
     document.getElementById("editPanel").classList.add("open");
     document.getElementById("panelOverlay").classList.add("active");
-}
+  }
   function closePanel() {
-    document.getElementById("editPanel").classList.remove("open");
-    document.getElementById("panelOverlay").classList.remove("active");
+    console.log("Closing panel");
+    const panel = document.getElementById("editPanel");
+    const overlay = document.getElementById("panelOverlay");
+
+    if (panel) panel.classList.remove("open");
+    if (overlay) overlay.classList.remove("active");
+
+    // Reset form and edit ID
+    if (document.getElementById("editForm")) {
+      document.getElementById("editForm").reset();
+    }
+    currentEditId = null;
   }
 
   // ─────────────────────────────────────────────
@@ -1590,13 +1921,13 @@ function openPanel(title) {
     const lead = fullLeadsData.find((l) => l.id == id);
     if (!lead) return;
     currentEditId = id;
-    
+
     // Helper function to safely set values
     const setFieldValue = (elementId, value) => {
       const el = document.getElementById(elementId);
       if (el) el.value = value;
     };
-    
+
     setFieldValue("editId", String(lead.id || ""));
     setFieldValue("editSalutation", lead.salutation || "");
     setFieldValue("editName", lead.name);
@@ -1614,11 +1945,14 @@ function openPanel(title) {
     setFieldValue("editDatum", lead.datum !== "—" ? lead.datum : "");
     setFieldValue("editNachfassen", lead.nachfassen || "");
     setFieldValue("editBearbeiter", lead.bearbeiter);
-    setFieldValue("editSumme", lead.summe
-      .replace("$", "")
-      .replace(/\./g, "")
-      .replace(",", ".")
-      .trim());
+    setFieldValue(
+      "editSumme",
+      lead.summe
+        .replace(/[$$]/g, "")
+        .replace(/\./g, "")
+        .replace(",", ".")
+        .trim(),
+    );
     setFieldValue("editDachflaeche", lead.dachflaeche || "");
     setFieldValue("editDachneigung", lead.dachneigung || "");
     setFieldValue("editDacheindeckung", lead.dacheindeckung || "");
@@ -1628,7 +1962,7 @@ function openPanel(title) {
     setFieldValue("editZusatzExtras", lead.zusatzExtras || "");
     setFieldValue("editSalesTyp", lead.salesTyp || "");
     setFieldValue("editKategorie", lead.kategorie || "");
-    
+
     openPanel("Lead bearbeiten");
   };
 
@@ -1674,27 +2008,36 @@ function openPanel(title) {
       : '<div class="empty-state">Keine Notizen vorhanden.</div>';
 
     // Activity timeline (lazy fetch)
-    const activityEl = document.getElementById('viewTabActivity');
+    const activityEl = document.getElementById("viewTabActivity");
     if (activityEl) {
-      activityEl.innerHTML = '<div class="empty-state loading-state">⏳ Lade Aktivitäten…</div>';
-      fetchActivityForLead(id).then(list => {
-        if (!list.length) {
-          activityEl.innerHTML = '<div class="empty-state">Keine Aktivitäten vorhanden.</div>';
-          return;
-        }
-        const cards = list.map(a => `
+      activityEl.innerHTML =
+        '<div class="empty-state loading-state">⏳ Lade Aktivitäten…</div>';
+      fetchActivityForLead(id)
+        .then((list) => {
+          if (!list.length) {
+            activityEl.innerHTML =
+              '<div class="empty-state">Keine Aktivitäten vorhanden.</div>';
+            return;
+          }
+          const cards = list
+            .map(
+              (a) => `
           <div class="activity-card">
-            <div class="activity-text">${escapeHtml(a.text || '')}</div>
+            <div class="activity-text">${escapeHtml(a.text || "")}</div>
             <div class="activity-meta">
-              <div class="activity-by">Erstellt von: <strong>${escapeHtml(a.by || 'System')}</strong></div>
-              <div class="activity-time">${escapeHtml(a.at || '—')}</div>
+              <div class="activity-by">Erstellt von: <strong>${escapeHtml(a.by || "System")}</strong></div>
+              <div class="activity-time">${escapeHtml(a.at || "—")}</div>
             </div>
           </div>
-        `).join('');
-        activityEl.innerHTML = `<div class="activity-wrap">${cards}</div>`;
-      }).catch(() => {
-        activityEl.innerHTML = '<div class="empty-state">Aktivitäten konnten nicht geladen werden.</div>';
-      });
+        `,
+            )
+            .join("");
+          activityEl.innerHTML = `<div class="activity-wrap">${cards}</div>`;
+        })
+        .catch(() => {
+          activityEl.innerHTML =
+            '<div class="empty-state">Aktivitäten konnten nicht geladen werden.</div>';
+        });
     }
 
     document.querySelectorAll(".view-tab").forEach((tab) => {
@@ -1752,15 +2095,19 @@ function openPanel(title) {
     if (!lead) return;
     createNoteForLead(currentNotesId, txt)
       .then(async () => {
-        showToast('Notiz gespeichert. Synchronisiere…', 'success', 2200);
+        showToast("Notiz gespeichert. Synchronisiere…", "success", 2200);
         document.getElementById("noteInput").value = "";
         await fetchNotesForLead(currentNotesId);
         renderNotesList();
         await refreshLeads();
         schedulePostCreateSync();
       })
-      .catch(err => {
-        showToast(err.message || 'Notiz speichern fehlgeschlagen', 'error', 2800);
+      .catch((err) => {
+        showToast(
+          err.message || "Notiz speichern fehlgeschlagen",
+          "error",
+          2800,
+        );
       });
   }
 
@@ -1772,37 +2119,73 @@ function openPanel(title) {
     }
   };
 
-  window.sendEmailLead = () => alert("E-Mail senden");
+  window.sendEmailLead = async (id) => {
+    const lead = fullLeadsData.find((l) => l.id == id);
+    if (!lead) {
+      showToast("Lead nicht gefunden", "error", 2000);
+      return;
+    }
+    const email = (lead.email || "").trim();
+    const leadName =
+      `${lead.salutation ? lead.salutation + " " : ""}${lead.name || ""}`.trim();
+
+    if (!email) {
+      showToast("Keine E-Mail-Adresse vorhanden", "error", 2200);
+      return;
+    }
+
+    const to = encodeURIComponent(email);
+    const subject = encodeURIComponent("Project Update");
+    const body = encodeURIComponent("Hi,\n\nHere is the update.\n\nRegards,");
+    const composeUrl = `https://hex2013.com/owa/?path=/mail/action/compose&to=${to}&subject=${subject}&body=${body}`;
+
+    try {
+      const activityText = `E-Mail geöffnet zu ${leadName} (${email})`;
+      await insertActivity(id, "email", activityText);
+    } catch (e) {
+      console.warn(
+        "E-Mail Aktivität konnte nicht gespeichert werden:",
+        e?.message || e,
+      );
+    }
+
+    window.open(composeUrl, "_blank");
+  };
+
+  // Safely read an input/select value by id; returns empty string if missing
+  function val(id) {
+    const el = document.getElementById(id);
+    return el ? el.value : "";
+  }
 
   function collectForm() {
     return {
-      salutation: document.getElementById("editSalutation").value,
-      name: document.getElementById("editName").value,
-      briefberatungTelefon: document.getElementById("editBriefberatungTelefon")
-        .value,
-      strasseObjekt: document.getElementById("editStrasseObjekt").value,
-      angebot: document.getElementById("editAngebot").value,
-      plz: document.getElementById("editPlz").value,
-      ort: document.getElementById("editOrt").value,
-      telefon: document.getElementById("editTelefon").value,
-      email: document.getElementById("editEmail").value,
-      status: document.getElementById("editStatus").value,
-      qualification: document.getElementById("editQualification").value,
-      quelle: document.getElementById("editQuelle").value,
-      kontaktVia: document.getElementById("editKontaktVia").value,
-      datum: document.getElementById("editDatum").value,
-      nachfassen: document.getElementById("editNachfassen").value,
-      bearbeiter: document.getElementById("editBearbeiter").value,
-      summe: document.getElementById("editSumme").value,
-      dachflaeche: document.getElementById("editDachflaeche").value,
-      dachneigung: document.getElementById("editDachneigung").value,
-      dacheindeckung: document.getElementById("editDacheindeckung").value,
-      farbe: document.getElementById("editFarbe").value,
-      dachpfanne: document.getElementById("editDachpfanne").value,
-      baujahr: document.getElementById("editBaujahr").value,
-      zusatzExtras: document.getElementById("editZusatzExtras").value,
-      salesTyp: document.getElementById("editSalesTyp").value,
-      kategorie: document.getElementById("editKategorie").value,
+      salutation: val("editSalutation"),
+      name: val("editName"),
+      briefberatungTelefon: val("editBriefberatungTelefon"),
+      strasseObjekt: val("editStrasseObjekt"),
+      angebot: val("editAngebot"),
+      plz: val("editPlz"),
+      ort: val("editOrt"),
+      telefon: val("editTelefon"),
+      email: val("editEmail"),
+      status: val("editStatus"),
+      qualification: val("editQualification"),
+      quelle: val("editQuelle"),
+      kontaktVia: val("editKontaktVia"),
+      datum: val("editDatum"),
+      nachfassen: val("editNachfassen"),
+      bearbeiter: val("editBearbeiter"),
+      summe: val("editSumme"),
+      dachflaeche: val("editDachflaeche"),
+      dachneigung: val("editDachneigung"),
+      dacheindeckung: val("editDacheindeckung"),
+      farbe: val("editFarbe"),
+      dachpfanne: val("editDachpfanne"),
+      baujahr: val("editBaujahr"),
+      zusatzExtras: val("editZusatzExtras"),
+      salesTyp: val("editSalesTyp"),
+      kategorie: val("editKategorie"),
     };
   }
 
@@ -1812,13 +2195,29 @@ function openPanel(title) {
       id: Date.now(),
       ...data,
       statusClass: getStatusClass(data.status),
-      summe: `$${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      summe: `$ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
       datum: data.datum || new Date().toISOString().split("T")[0],
       notes: [],
     };
     fullLeadsData.unshift(newLead);
     totalLeads++;
     totalPages = Math.ceil(totalLeads / rowsPerPage);
+    loadPage(1);
+  }
+
+  // Add a temporary lead so UI reflects creation instantly until reload
+  function addPendingCreate(data) {
+    const tempLead = {
+      id: -Date.now(),
+      ...data,
+      statusClass: getStatusClass(data.status),
+      summe: `$ ${(parseFloat(data.summe) || 0).toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      datum: data.datum || new Date().toISOString().split("T")[0],
+      notes: [],
+    };
+    pendingCreates.unshift(tempLead);
+    // Rebuild current view with optimistic cache
+    fullLeadsData = mergeAfterFetch(fullLeadsData);
     loadPage(1);
   }
 
@@ -1830,8 +2229,10 @@ function openPanel(title) {
       ...fullLeadsData[idx],
       ...data,
       statusClass: getStatusClass(data.status),
-      summe: `$${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      summe: `$ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
     };
+    // Track as pending update until backend reflects it
+    pendingUpdates.set(String(id), data);
     loadPage(currentPage);
   }
 
@@ -1880,6 +2281,11 @@ function openPanel(title) {
       ?.addEventListener("change", applyFilters);
     document
       .getElementById("filter-quelle")
+      ?.addEventListener("change", applyFilters);
+
+    // filter-bearbeiter
+    document
+      .getElementById("filter-bearbeiter")
       ?.addEventListener("change", applyFilters);
 
     // Rows per page change listener
@@ -1932,11 +2338,67 @@ function openPanel(title) {
       ?.addEventListener("click", closePanel);
 
     // Form submit
-    document.getElementById("editForm")?.addEventListener("submit", async e => {
-      e.preventDefault();
-      const data = collectForm();
-      if (!data.name) { alert("Bitte Name eingeben"); return; }
-      if (currentEditId) {
+    document
+      .getElementById("editForm")
+      ?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const data = collectForm();
+        if (!data.name) {
+          alert("Bitte Name eingeben");
+          return;
+        }
+// In the form submit handler, when updating existing lead:
+// In your form submit handler for update:
+if (currentEditId) {
+  try {
+    const data = collectForm();
+    
+    // Map to correct field names for PHP API
+    const payload = {
+      id: String(currentEditId),  // Important: use "id" not "lead_id"
+      name: data.name,
+      salutation: data.salutation,
+      erstberatung_telefon: data.briefberatungTelefon,
+      strasse_objekt: data.strasseObjekt,
+      angebot: data.angebot,
+      plz: data.plz,
+      ort: data.ort,
+      telefon: data.telefon,
+      email: data.email,
+      status: data.status,
+      einschaetzung_kunde: data.qualification,
+      lead_quelle: data.quelle,
+      kontakt_via: data.kontaktVia,
+      datum: data.datum,
+      nachfassen: data.nachfassen,
+      bearbeiter: data.bearbeiter,
+      summe_netto: data.summe,
+      dachflaeche_m2: data.dachflaeche,
+      dachneigung_grad: data.dachneigung,
+      dacheindeckung: data.dacheindeckung,
+      wunsch_farbe: data.farbe,
+      dachpfanne: data.dachpfanne,
+      baujahr_dach: data.baujahr,
+      zusaetzliche_extras: data.zusatzExtras,
+      sale_typ: data.salesTyp,
+    };
+    
+    closePanel();
+    showToast("Updating lead...", "info", 1000);
+    
+    // Call the update function
+    const response = await updateLeadOnAPI(currentEditId, payload);
+    console.log("Update response:", response);
+    
+    showToast("Lead updated successfully!", "success", 2000);
+    await refreshLeads();
+    
+  } catch (err) {
+    console.error("Update error:", err);
+    showToast(err.message || "Update failed", "error", 3000);
+  }
+  return;
+}
         try {
           const payload = {
             salutation: data.salutation,
@@ -1966,54 +2428,18 @@ function openPanel(title) {
             sale_typ: data.salesTyp,
             kategorie: data.kategorie,
           };
-          await updateLeadOnAPI(currentEditId, payload);
-          showToast('Lead aktualisiert. Synchronisiere…', 'success', 2200);
+          // Hide panel immediately and add optimistic row
+          closePanel();
+          addPendingCreate(data);
+          const resp = await createLeadOnAPI(payload);
+          console.log("🆕 Create response:", resp);
+          showToast("Lead wurde erstellt. Synchronisiere…", "success", 2200);
           await refreshLeads();
           schedulePostCreateSync();
-          closePanel();
         } catch (err) {
-          showToast(err.message || 'Aktualisierung fehlgeschlagen', 'error', 2800);
+          showToast(err.message || "Erstellen fehlgeschlagen", "error", 2800);
         }
-        return;
-      }
-      try {
-        const payload = {
-          salutation: data.salutation,
-          name: data.name,
-          erstberatung_telefon: data.briefberatungTelefon,
-          strasse_objekt: data.strasseObjekt,
-          angebot: data.angebot,
-          plz: data.plz,
-          ort: data.ort,
-          telefon: data.telefon,
-          email: data.email,
-          status: data.status,
-          einschaetzung_kunde: data.qualification,
-          lead_quelle: data.quelle,
-          kontakt_via: data.kontaktVia,
-          datum: data.datum,
-          nachfassen: data.nachfassen,
-          bearbeiter: data.bearbeiter,
-          summe_netto: data.summe,
-          dachflaeche_m2: data.dachflaeche,
-          dachneigung_grad: data.dachneigung,
-          dacheindeckung: data.dacheindeckung,
-          wunsch_farbe: data.farbe,
-          dachpfanne: data.dachpfanne,
-          baujahr_dach: data.baujahr,
-          zusaetzliche_extras: data.zusatzExtras,
-          sale_typ: data.salesTyp,
-          kategorie: data.kategorie,
-        };
-        await createLeadOnAPI(payload);
-        showToast('Lead wurde erstellt. Synchronisiere…', 'success', 2200);
-        await refreshLeads();
-        schedulePostCreateSync();
-        closePanel();
-      } catch (err) {
-        showToast(err.message || 'Erstellen fehlgeschlagen', 'error', 2800);
-      }
-    });
+      });
 
     // View modal
     document
@@ -2044,11 +2470,15 @@ function openPanel(title) {
       ?.addEventListener("click", () =>
         document.getElementById("massEmailModal").classList.remove("active"),
       );
-    document.getElementById("massEmailModal")?.addEventListener("click", (e) => {
-      if (e.target === document.getElementById("massEmailModal"))
-        document.getElementById("massEmailModal").classList.remove("active");
-    });
-    document.getElementById("sendMassEmailBtn")?.addEventListener("click", sendMassEmails);
+    document
+      .getElementById("massEmailModal")
+      ?.addEventListener("click", (e) => {
+        if (e.target === document.getElementById("massEmailModal"))
+          document.getElementById("massEmailModal").classList.remove("active");
+      });
+    document
+      .getElementById("sendMassEmailBtn")
+      ?.addEventListener("click", sendMassEmails);
   }
 
   return { init };

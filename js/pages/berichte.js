@@ -1,34 +1,46 @@
 const berichtePage = (function () {
 
-  // ── Sample data (same shape as leadsData in leads.js) ──────────────────────
-  const rawData = [
-    { status: "Abgesagt",                quelle: "Google",       summe: 3200,  jahr: 2025 },
-    { status: "Abgesagt hat",            quelle: "Google",       summe: 7100,  jahr: 2025 },
-    { status: "Abgesagt hat",            quelle: "Facebook",     summe: 5400,  jahr: 2024 },
-    { status: "Abgesagt hat",            quelle: "Empfehlung",   summe: 6600,  jahr: 2025 },
-    { status: "angebot",                 quelle: "Bing",         summe: 1200,  jahr: 2025 },
-    { status: "Aufnahme Einzugsgebiet",  quelle: "ChatGPT",      summe: 900,   jahr: 2024 },
-    { status: "Beauftrag!",              quelle: "Empfehlung",   summe: 2100,  jahr: 2025 },
-    { status: "Beauftragung",            quelle: "Google",       summe: 4300,  jahr: 2025 },
-    { status: "EA Beauftragung",         quelle: "Google",       summe: 800,   jahr: 2024 },
-    { status: "EA Beauftragung",         quelle: "Facebook",     summe: 1350,  jahr: 2025 },
-    { status: "falscher Kunde",          quelle: "Flyer",        summe: 600,   jahr: 2024 },
-    { status: "follow up",               quelle: "Instagram",    summe: 3900,  jahr: 2025 },
-    { status: "Ghostet",                 quelle: "Empfehlung",   summe: 1100,  jahr: 2025 },
-    { status: "In Bearbeitung",          quelle: "Google",       summe: 2800,  jahr: 2025 },
-    { status: "In Bearbeitung",          quelle: "Google",       summe: 1900,  jahr: 2024 },
-    { status: "In Bearbeitung",          quelle: "MA Baustelle", summe: 4500,  jahr: 2025 },
-    { status: "In Bearbeitung - angebot",quelle: "MA Baustelle", summe: 3300,  jahr: 2025 },
-    { status: "In Bearbeitung - Preisanforderung", quelle: "Niemand", summe: 700, jahr: 2024 },
-    { status: "Infos abgerufen",         quelle: "Bing",         summe: 500,   jahr: 2025 },
-    { status: "NF Beauftragung",         quelle: "Google",       summe: 1800,  jahr: 2025 },
-    { status: "NF Beauftragung",         quelle: "Facebook",     summe: 2200,  jahr: 2025 },
-    { status: "Nur Info eingeholt",      quelle: "ChatGPT",      summe: 1600,  jahr: 2024 },
-    { status: "Offen",                   quelle: "Empfehlung",   summe: 950,   jahr: 2025 },
-    { status: "Sonstiges",               quelle: "Flyer",        summe: 300,   jahr: 2024 },
-    { status: "2025",                    quelle: "Benutzerdienst",summe: 1400, jahr: 2025 },
-    { status: "2024",                    quelle: "Ausweichung",  summe: 1700,  jahr: 2024 },
-  ];
+  // Live data populated from API
+  let rawData = [];
+
+  // Same-origin first, fallback remote
+  const SO_LEADS = '/api/all_leads';
+  const REMOTE_LEADS_URL = 'https://goarrow.ai/test/fetch_all_leads.php';
+
+  async function fetchLeadsForReports() {
+    const tryFetch = async (url) => {
+      const r = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    };
+
+    const PROXY1 = `https://corsproxy.io/?${encodeURIComponent(REMOTE_LEADS_URL)}`;
+    const PROXY2 = `https://api.allorigins.win/raw?url=${encodeURIComponent(REMOTE_LEADS_URL)}`;
+
+    const isLocalStatic = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+    const candidates = isLocalStatic
+      ? [PROXY1, PROXY2, REMOTE_LEADS_URL, SO_LEADS]
+      : [SO_LEADS, REMOTE_LEADS_URL, PROXY1, PROXY2];
+
+    let data = null;
+    const errors = [];
+    for (const url of candidates) {
+      try { data = await tryFetch(url); break; }
+      catch (e) { errors.push(`${url}: ${e.message}`); }
+    }
+    if (!data) {
+      console.warn('Berichte fetch failed. Tried ->', errors.join(' | '));
+      return [];
+    }
+
+    const list = Array.isArray(data) ? data : (data.data || data.leads || data.items || []);
+    return (list || []).map(item => ({
+      status: item.status || 'Offen',
+      quelle: item.lead_quelle || '—',
+      summe: parseFloat(String(item.summe_netto || '0').replace(/[€$\s]/g,'').replace(/\./g,'').replace(/,/g,'.')) || 0,
+      bearbeiter: item.bearbeiter || '—',
+    }));
+  }
 
   let currentFilter = 'Alle';
   let qChart = null;
@@ -47,7 +59,7 @@ const berichtePage = (function () {
   // ── Filter helper ─────────────────────────────────────────────────────────
   function filtered() {
     if (currentFilter === 'Alle') return rawData;
-    return rawData.filter(d => String(d.jahr) === currentFilter);
+    return rawData.filter(d => (d.bearbeiter || '—') === currentFilter);
   }
 
   // ── Group by key ──────────────────────────────────────────────────────────
@@ -75,7 +87,7 @@ const berichtePage = (function () {
         </div>
       </div>
 
-      <!-- Year filter -->
+      <!-- Bearbeiter filter -->
       <div class="b-filter-row">
         <select class="b-select" id="b-year-filter">
           <option value="Alle">Alle</option>
@@ -414,12 +426,17 @@ const berichtePage = (function () {
     if (!contentEl) return;
     contentEl.innerHTML = getHTML();
 
-    loadChartJs(() => {
+    loadChartJs(async () => {
+      // Load live data
+      rawData = await fetchLeadsForReports();
+      currentFilter = 'Alle';
+      const ddl = document.getElementById('b-year-filter');
+      if (ddl) ddl.value = 'Alle';
       drawCharts();
 
-      // Year filter
+      // Bearbeiter filter
       document.getElementById('b-year-filter')?.addEventListener('change', (e) => {
-        currentFilter = e.target.value;
+        currentFilter = e.target.value || 'Alle';
         drawCharts();
       });
 
