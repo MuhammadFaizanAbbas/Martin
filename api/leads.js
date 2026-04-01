@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  const target = 'https://goarrow.ai/test/fetch_all_leads.php';
+  const target = 'https://goarrow.ai/test/fetch_lead.php';
   try {
     const r = await fetch(target, { headers: { Accept: 'application/json' } });
     const text = await r.text();

@@ -94,14 +94,18 @@ const kundenPage = (function () {
       { url: PROXY_LEADS_URL, delay: 1100 },
       { url: ALT_PROXY_LEADS_URL, delay: 1400 },
     ]);
-
-    if (!result.success || !result.data || result.data.status !== "success") {
+    if (!result.success || !result.data) {
       console.error("Failed to fetch leads:", result.error);
       return [];
     }
 
+    // Accept multiple upstream shapes
+    const rawList = Array.isArray(result.data)
+      ? result.data
+      : (result.data.data || result.data.leads || result.data.items || []);
+
     // Transform API data to our internal format
-    return (result.data.data || []).map((apiLead) => ({
+    return (rawList || []).map((apiLead) => ({
       id: apiLead.id,
       name: apiLead.name || "—",
       salutation: apiLead.salutation || "",
@@ -141,12 +145,14 @@ const kundenPage = (function () {
       { url: ALT_PROXY_DASHBOARD_URL, delay: 1400 },
     ]);
 
-    if (!result.success || !result.data || result.data.status !== "success") {
+    if (!result.success || !result.data) {
       console.error("Failed to fetch dashboard stats:", result.error);
       return {};
     }
 
-    return result.data.data || {};
+    if (result.data.data && typeof result.data.data === 'object') return result.data.data;
+    if (typeof result.data === 'object') return result.data;
+    return {};
   }
 
   // ── Load all data ─────────────────────────────────────────────────────────
@@ -156,7 +162,7 @@ const kundenPage = (function () {
 
     const tbody = document.getElementById("kunden-tbody");
     if (tbody) {
-      tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">⏳ Daten werden geladen...</div></tr>`;
+      tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">⏳ Daten werden geladen...</div></td></tr>`;
     }
 
     // Kick off both requests without blocking UI
@@ -168,7 +174,7 @@ const kundenPage = (function () {
       .catch((e) => {
         console.error("Leads load failed", e);
         if (tbody) {
-          tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div></tr>`;
+          tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div></td></tr>`;
         }
       })
       .finally(() => {
@@ -291,6 +297,235 @@ const kundenPage = (function () {
     el.innerHTML = html;
   }
 
+  // ── Show/Hide mass email button based on selections ───────────────────────
+  function updateMassEmailButton() {
+    const massEmailBtn = document.getElementById("mass-email-btn");
+    const selectedCount = selectedKunden.size;
+    
+    if (massEmailBtn) {
+      if (selectedCount > 0) {
+        massEmailBtn.style.display = "flex";
+        massEmailBtn.innerHTML = `
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <rect x="2" y="4" width="20" height="16" rx="2"/>
+            <path d="m22 7-10 7L2 7"/>
+          </svg>
+          Senden Sie Massen-E-Mails (${selectedCount})
+        `;
+      } else {
+        massEmailBtn.style.display = "none";
+      }
+    }
+  }
+
+  // ── Open mass email modal with selected leads ─────────────────────────────
+  function openMassEmailModal() {
+    if (selectedKunden.size === 0) return;
+    
+    const selectedLeads = leadsData.filter(lead => selectedKunden.has(lead.id));
+    
+    // Create modal HTML
+    const modalHtml = `
+      <div id="massEmailModal" class="k-modal-overlay">
+        <div class="k-modal-content" style="max-width: 650px;">
+          <div class="k-modal-header">
+            <h3>Senden Sie Massen-E-Mails</h3>
+            <button class="k-close-btn" id="closeMassEmailModal">&times;</button>
+          </div>
+          <div class="k-modal-body">
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Choose an E-Mail</label>
+              <select id="email-template-select" class="k-full-select">
+              <option value="E1">E1</option>
+              <option value="E2">E2</option>
+              <option value="E3">E3</option>
+              <option value="E4">E4</option>
+              <option value="E5">E5</option>
+              <option value="E6">E6</option>
+              <option value="E7">E7</option>
+              <option value="E8">E8</option>
+              <option value="E9">E9</option>
+              <option value="E10">E10</option>
+              </select>
+            </div>
+            
+            <div class="email-recipients-list" style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Empfänger (${selectedLeads.length})</label>
+              <div style="max-height: 200px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+                ${selectedLeads.map(lead => {
+                  const displayName = (lead.salutation ? lead.salutation + " " : "") + lead.name;
+                  return `
+                    <div style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 8px;">
+                      <input type="checkbox" class="recipient-checkbox" data-id="${lead.id}" data-name="${escapeHtml(displayName)}" data-email="${escapeHtml(lead.email)}" checked style="accent-color: #22c55e;">
+                      <div style="flex: 1;">
+                        <div style="font-weight: 500; font-size: 0.85rem;">${escapeHtml(displayName)}</div>
+                        <div style="font-size: 0.75rem; color: #64748b;">${escapeHtml(lead.email)}</div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+              <div style="margin-top: 8px;">
+                <button type="button" id="select-all-recipients" class="k-btn-outline" style="font-size: 0.75rem; padding: 4px 8px;">Alle auswählen</button>
+                <button type="button" id="deselect-all-recipients" class="k-btn-outline" style="font-size: 0.75rem; padding: 4px 8px; margin-left: 8px;">Alle abwählen</button>
+              </div>
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Name</label>
+              <input type="text" id="email-name" placeholder="Name" class="k-full-input" style="padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%;">
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">E-Mail Betreff</label>
+              <input type="text" id="email-subject" placeholder="Betreff" class="k-full-input" style="padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%;">
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Nachricht</label>
+              <textarea id="email-message" rows="6" placeholder="Ihre Nachricht hier..." class="k-full-input" style="padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; font-family: inherit;"></textarea>
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Notiz</label>
+              <input type="text" id="email-note" placeholder="Notiz" class="k-full-input" style="padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%;">
+            </div>
+            
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+              <button type="button" id="cancelMassEmail" class="k-btn-outline" style="padding: 10px 20px; border: 1px solid #e2e8f0; background: white; border-radius: 8px; cursor: pointer;">Abbrechen</button>
+              <button type="button" id="sendMassEmail" class="k-btn-green">E-Mail senden</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Remove existing modal if present
+    const existingModal = document.getElementById("massEmailModal");
+    if (existingModal) existingModal.remove();
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById("massEmailModal");
+    const closeBtn = document.getElementById("closeMassEmailModal");
+    const cancelBtn = document.getElementById("cancelMassEmail");
+    const sendBtn = document.getElementById("sendMassEmail");
+    const selectAllBtn = document.getElementById("select-all-recipients");
+    const deselectAllBtn = document.getElementById("deselect-all-recipients");
+    const emailSelect = document.getElementById("email-template-select");
+    const nameInput = document.getElementById("email-name");
+    const subjectInput = document.getElementById("email-subject");
+    const messageInput = document.getElementById("email-message");
+    
+    // Template presets
+    const templates = {
+      standard: {
+        subject: "Informationen zu Ihrem Dachprojekt",
+        message: "Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihr Interesse an unseren Dienstleistungen. Wir möchten Sie gerne zu einem persönlichen Gespräch einladen, um Ihre Möglichkeiten zu besprechen.\n\nBitte lassen Sie uns wissen, wann es Ihnen passt.\n\nMit freundlichen Grüßen,\nIhr Team"
+      },
+      followup: {
+        subject: "Follow-up zu Ihrem Angebot",
+        message: "Hallo,\n\nich wollte mich erkundigen, ob Sie bereits Gelegenheit hatten, unser Angebot zu prüfen. Sollten Sie Fragen haben, stehe ich gerne zur Verfügung.\n\nIch freue mich auf Ihre Rückmeldung.\n\nBeste Grüße"
+      },
+      offer: {
+        subject: "Ihr persönliches Angebot",
+        message: "Guten Tag,\n\nanbei erhalten Sie Ihr persönliches Angebot für Ihr Dachprojekt. Bei Fragen können Sie mich jederzeit kontaktieren.\n\nIch freue mich auf die Zusammenarbeit.\n\nViele Grüße"
+      }
+    };
+    
+    // Load template on select change
+    emailSelect.addEventListener('change', () => {
+      const template = templates[emailSelect.value];
+      if (template && emailSelect.value !== 'custom') {
+        subjectInput.value = template.subject;
+        messageInput.value = template.message;
+      }
+    });
+    
+    // Select all recipients
+    if (selectAllBtn) {
+      selectAllBtn.addEventListener('click', () => {
+        document.querySelectorAll('.recipient-checkbox').forEach(cb => cb.checked = true);
+      });
+    }
+    
+    // Deselect all recipients
+    if (deselectAllBtn) {
+      deselectAllBtn.addEventListener('click', () => {
+        document.querySelectorAll('.recipient-checkbox').forEach(cb => cb.checked = false);
+      });
+    }
+    
+    // Close modal
+    const closeModal = () => {
+      modal.classList.remove('active');
+      setTimeout(() => modal.remove(), 300);
+    };
+    
+    closeBtn?.addEventListener('click', closeModal);
+    cancelBtn?.addEventListener('click', closeModal);
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+    
+    // Send emails
+    sendBtn?.addEventListener('click', () => {
+      const selectedRecipients = Array.from(document.querySelectorAll('.recipient-checkbox:checked')).map(cb => ({
+        id: parseInt(cb.dataset.id),
+        name: cb.dataset.name,
+        email: cb.dataset.email
+      }));
+      
+      if (selectedRecipients.length === 0) {
+        alert("Bitte wählen Sie mindestens einen Empfänger aus.");
+        return;
+      }
+      
+      const name = nameInput.value.trim();
+      const subject = subjectInput.value.trim();
+      const message = messageInput.value.trim();
+      const note = document.getElementById("email-note")?.value.trim() || "";
+      
+      if (!subject) {
+        alert("Bitte geben Sie einen Betreff ein.");
+        return;
+      }
+      
+      if (!message) {
+        alert("Bitte geben Sie eine Nachricht ein.");
+        return;
+      }
+      
+      // Prepare email data
+      const emailData = {
+        recipients: selectedRecipients,
+        name: name,
+        subject: subject,
+        message: message,
+        note: note,
+        date: new Date().toISOString()
+      };
+      
+      console.log("Sending mass email:", emailData);
+      
+      // Here you would send the emails via your API
+      // For now, show success message
+      alert(`E-Mails werden an ${selectedRecipients.length} Empfänger gesendet:\n\nBetreff: ${subject}\n\nNachricht: ${message.substring(0, 100)}...`);
+      
+      // Close modal
+      closeModal();
+    });
+    
+    // Show modal
+    modal.classList.add('active');
+    
+    // Load initial template
+    const initialTemplate = templates.standard;
+    subjectInput.value = initialTemplate.subject;
+    messageInput.value = initialTemplate.message;
+  }
+
   // ── Main render function ──────────────────────────────────────────────────
   function renderKunden() {
     // Check if we have data
@@ -343,7 +578,7 @@ const kundenPage = (function () {
     tbody.innerHTML = "";
 
     if (!filteredData.length) {
-      tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">Keine Kunden in dieser Kategorie.</div></tr>`;
+      tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">Keine Kunden in dieser Kategorie.</div></td></tr>`;
       updateCount();
       return;
     }
@@ -356,7 +591,6 @@ const kundenPage = (function () {
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <tr>
         <td>
           <input type="checkbox" class="cb kunden-cb" data-id="${lead.id}" ${selectedKunden.has(lead.id) ? "checked" : ""}>
         </td>
@@ -371,12 +605,7 @@ const kundenPage = (function () {
         <td>${lead.quelle ? `<span class="tag">${escapeHtml(lead.quelle)}</span>` : ""}</td>
         <td>${lead.bearbeiter ? `<span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span>` : ""}</td>
         <td>
-              <div style="width:32px;height:32px;border-radius:50%;background:#f0f0f0;"></div>
-
-        
-          
-            <div style="width:18px;height:18px;background:white;border-radius:50%;position:absolute;top:2px;left:2px;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2)"></div>
-          </div>
+          <div style="width:32px;height:32px;border-radius:50%;background:#f0f0f0;"></div>
         </td>
         <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
         <td><span class="date-cell">${escapeHtml(lead.datum)}</span></td>
@@ -445,10 +674,12 @@ const kundenPage = (function () {
         if (e.target.checked) selectedKunden.add(id);
         else selectedKunden.delete(id);
         updateCount();
+        updateMassEmailButton();
       });
     });
 
     updateCount();
+    updateMassEmailButton();
   }
 
   function updateCount() {
@@ -578,6 +809,8 @@ const kundenPage = (function () {
     console.log(`Delegate lead ${id}: ${!on ? "assigned" : "unassigned"}`);
   };
 
+  window.openMassEmailModal = openMassEmailModal;
+
   // ── Status modal save ─────────────────────────────────────────────────────
   function saveStatusUpdate() {
     const newStatus = document.getElementById("statusModalSelect")?.value;
@@ -625,6 +858,26 @@ const kundenPage = (function () {
       .search-box input { border: none; outline: none; font-size: 0.85rem; width: 220px; height: 30px; }
       .spacer { flex: 1; }
       .table-label { margin: 8px 0 16px; font-size: 0.85rem; color: #64748b; }
+      .mass-email-btn {
+        display: none;
+        align-items: center;
+        gap: 8px;
+        background: #22c55e;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .mass-email-btn:hover {
+        background: #16a34a;
+      }
+      .mass-email-btn svg {
+        stroke: white;
+      }
       .table-wrap { overflow-x: auto; background: white; border-radius: 16px; border: 1px solid #eef2f8; }
       #kunden-table { width: 100%; border-collapse: collapse; min-width: 1300px; }
       #kunden-table th { text-align: left; padding: 13px 10px; background: #f8fafc; color: #475569; font-weight: 600; font-size: 0.78rem; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
@@ -670,8 +923,12 @@ const kundenPage = (function () {
       .k-close-btn { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: #94a3b8; line-height: 1; }
       .k-modal-body { flex: 1; overflow-y: auto; padding: 20px 24px 24px; }
       .k-full-select { width: 100%; padding: 11px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 0.9rem; background: white; color: #64748b; }
+      .k-full-input { width: 100%; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem; font-family: inherit; }
+      .k-full-input:focus { outline: none; border-color: #22c55e; }
       .k-btn-green { background: #22c55e; color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
       .k-btn-green:hover { background: #16a34a; }
+      .k-btn-outline { background: white; border: 1px solid #e2e8f0; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+      .k-btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
       .k-view-section { margin-bottom: 20px; }
       .k-view-section h4 { font-size: 0.95rem; font-weight: 600; color: #0f172a; margin-bottom: 10px; padding-bottom: 7px; border-bottom: 1px solid #e2e8f0; }
       .k-detail-row { display: flex; padding: 9px 0; border-bottom: 1px solid #f8fafc; }
@@ -698,6 +955,13 @@ const kundenPage = (function () {
             <input type="text" placeholder="Suche..." id="kunden-search"/>
           </div>
           <div class="spacer"></div>
+          <button id="mass-email-btn" class="mass-email-btn" onclick="window.openMassEmailModal()" style="display: none;">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <rect x="2" y="4" width="20" height="16" rx="2"/>
+              <path d="m22 7-10 7L2 7"/>
+            </svg>
+            Senden Sie Massen-E-Mails
+          </button>
         </div>
         <div class="table-label" id="kunden-selected-count">Wählen Sie Leads aus: 0</div>
         <div class="table-wrap">
@@ -721,7 +985,7 @@ const kundenPage = (function () {
               </tr>
             </thead>
             <tbody id="kunden-tbody"></tbody>
-          </table>
+           </table>
         </div>
       </div>
 
@@ -796,6 +1060,7 @@ const kundenPage = (function () {
           else selectedKunden.delete(id);
         });
         updateCount();
+        updateMassEmailButton();
       });
 
     // View modal close
@@ -829,7 +1094,7 @@ const kundenPage = (function () {
       .getElementById("statusModalSaveBtn")
       ?.addEventListener("click", saveStatusUpdate);
 
-    console.log("✅ Kunden page loaded with real API data");
+    console.log("✅ Kunden page loaded with real API data and mass email feature");
   }
 
   return { init };

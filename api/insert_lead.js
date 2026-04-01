@@ -1,15 +1,30 @@
 export default async function handler(req, res) {
+  // Basic CORS + preflight (harmless even on same-origin)
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(405).json({ status: 'error', message: 'Method Not Allowed' });
   }
 
   const target = 'https://goarrow.ai/test/insert_lead.php';
 
   try {
-    // Expect JSON from client; convert to x-www-form-urlencoded for PHP backend
-    const body = typeof req.body === 'object' && req.body !== null ? req.body : {};
+    // Parse body defensively: Vercel functions may provide raw string
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); }
+      catch {
+        // Try urlencoded
+        const usp = new URLSearchParams(body);
+        body = Object.fromEntries(usp.entries());
+      }
+    }
+    if (body == null || typeof body !== 'object') body = {};
+
     const params = new URLSearchParams();
     Object.entries(body).forEach(([k, v]) => {
       if (v !== undefined && v !== null) params.append(k, String(v));
@@ -26,10 +41,9 @@ export default async function handler(req, res) {
     try { json = JSON.parse(text); }
     catch { json = { status: 'success', raw: text }; }
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json(json);
   } catch (err) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(500).json({ status: 'error', message: err.message });
   }
 }

@@ -79,8 +79,10 @@ const berichtePage = (function () {
       <div class="b-filter-row">
         <select class="b-select" id="b-year-filter">
           <option value="Alle">Alle</option>
-          <option value="2025">2025</option>
-          <option value="2024">2024</option>
+          <option value="Philipp">Philipp</option>
+          <option value="Martin">Martin</option>
+          <option value="André">André</option>
+          <option value="Simon">Simon</option>
         </select>
       </div>
 
@@ -117,8 +119,25 @@ const berichtePage = (function () {
         <div class="b-section-title" style="margin-bottom:0">Summe Netto</div>
         <select class="b-select" id="b-summe-filter">
           <option value="">Wählen Sie eine Option sume...</option>
-          <option value="quelle">Nach Quelle</option>
-          <option value="status">Nach Status</option>
+          <option value="2025-01">2025-01</option>
+          <option value="2025-02">2025-02</option>
+          <option value="2025-03">2025-03</option>
+          <option value="2025-04">2025-04</option>
+          <option value="2025-05">2025-05</option>
+          <option value="2025-06">2025-06</option>
+          <option value="2025-07">2025-07</option>
+          <option value="2025-08">2025-08</option>
+          <option value="2025-09">2025-09</option>
+          <option value="2025-10">2025-10</option>
+          <option value="2025-11">2025-11</option>
+          <option value="2025-12">2025-12</option>
+           <option value="2025-11">2025-11</option>
+          <option value="2026-01">2026-01</option>
+          <option value="2026-02">2026-02</option>
+          <option value="2026-03">2025-03</option>
+          <option value="2026-04">2025-04</option>
+          <option value="2026-05">2025-05</option>
+          <option value="2026-06">2025-05</option>
         </select>
       </div>
       <div class="b-card b-card-fullwidth" id="summe-chart-wrap" style="display:none">
