@@ -12,6 +12,8 @@ const kundenPage = (function () {
   const REMOTE_DASHBOARD_URL = "https://goarrow.ai/test/dashboard.php";
   const ACTIVITY_FETCH_SAME = "/api/lead_activity";
   const NOTES_FETCH_SAME = "/api/lead_notes";
+  const ACTIVITY_INSERT_SAME = "/api/insert_activity";
+  const ACTIVITY_INSERT_DIRECT = "https://goarrow.ai/test/insert_activity.php";
 
   const PROXY_LEADS_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_LEADS_URL)}`;
   const PROXY_DASHBOARD_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_DASHBOARD_URL)}`;
@@ -215,6 +217,61 @@ const kundenPage = (function () {
       }
     }
     return [];
+  }
+
+  async function insertActivityForLead(lead, description, phoneNumber) {
+    const actor = String(lead?.bearbeiter || "").trim() || "System";
+    const payload = {
+      lead_id: lead.id,
+      from: actor,
+      description,
+      action: "call",
+      activity_type: "call",
+      activity_text: description,
+      user: actor,
+      created_by: actor,
+      phone: phoneNumber || lead.telefon || "",
+      lead_name: lead.name || "",
+      timestamp: new Date().toISOString(),
+    };
+    const params = new URLSearchParams();
+    Object.entries(payload).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
+
+    if (!isStaticLocalHost()) {
+      try {
+        const res = await fetch(ACTIVITY_INSERT_SAME, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        console.warn("Same-origin activity insert failed:", err.message);
+      }
+    }
+
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(ACTIVITY_INSERT_DIRECT)}`;
+    const res = await fetch(proxyUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { status: "success", raw: text };
+    }
   }
 
   async function fetchLeads() {
@@ -960,18 +1017,27 @@ const kundenPage = (function () {
       console.log(`📞 Calling ${lead.name} (ID: ${lead.id}) at ${phoneNumber}`);
       console.log(`🔗 Opening 3CX: ${callUrl}`);
       
-      window.open(callUrl, "_blank");
+      const callWindow = window.open(callUrl, "_blank");
+      if (!callWindow) {
+        alert("Anruf konnte nicht geÃ¶ffnet werden.");
+        return;
+      }
       
+      const actor = String(lead.bearbeiter || "").trim() || "System";
+      const description = `${actor} rief an ${phoneNumber}`;
+      const optimistic = {
+        text: description,
+        by: actor,
+        at: new Date().toLocaleString(),
+      };
+      const existing = activityCache.get(String(lead.id)) || [];
+      activityCache.set(String(lead.id), [optimistic, ...existing]);
+
       try {
+        await insertActivityForLead(lead, description, phoneNumber);
         const activityData = {
           lead_id: lead.id,
-          lead_name: lead.name,
-          action: "call_initiated",
-          phone: lead.telefon,
-          phone_formatted: phoneNumber,
-          timestamp: new Date().toISOString(),
-          user: lead.bearbeiter || "current_user",
-          source: "kunden_page_phone_icon"
+          description,
         };
         
         console.log("✅ Call logged:", activityData);
