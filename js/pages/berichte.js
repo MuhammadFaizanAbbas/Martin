@@ -39,6 +39,7 @@ const berichtePage = (function () {
       quelle: item.lead_quelle || '—',
       summe: parseFloat(String(item.summe_netto || '0').replace(/[€$\s]/g,'').replace(/\./g,'').replace(/,/g,'.')) || 0,
       bearbeiter: item.bearbeiter || '—',
+      monat: String(item.created_at || item.datum || '').slice(0,7)
     }));
   }
 
@@ -48,6 +49,7 @@ const berichtePage = (function () {
   let sChart = null;
   let sBarChart = null;
   let gChart = null;
+  let monthlyTotals = [];
 
   const COLORS = [
     '#2d7a3a','#4caf50','#81c784','#a5d6a7','#388e3c',
@@ -126,23 +128,31 @@ const berichtePage = (function () {
         </div>
       </div>
 
-      <!-- Summe Netto -->
+      <!-- Summe Netto (Monatswerte) -->
       <div class="b-summe-header">
         <div class="b-section-title" style="margin-bottom:0">Summe Netto</div>
         <select class="b-select" id="b-summe-filter">
           <option value="">Wählen Sie eine Option sume...</option>
+<<<<<<< HEAD
+=======
+          <option value="Alle">Alle</option>
+>>>>>>> eb17abbedcf4a8620a0783e7b569e410f0cbe9c7
           <option value="2025-01">2025-01</option>
           <option value="2025-02">2025-02</option>
           <option value="2025-03">2025-03</option>
           <option value="2025-04">2025-04</option>
           <option value="2025-05">2025-05</option>
           <option value="2025-06">2025-06</option>
+<<<<<<< HEAD
           <option value="2025-07">2025-07</option>
+=======
+>>>>>>> eb17abbedcf4a8620a0783e7b569e410f0cbe9c7
           <option value="2025-08">2025-08</option>
           <option value="2025-09">2025-09</option>
           <option value="2025-10">2025-10</option>
           <option value="2025-11">2025-11</option>
           <option value="2025-12">2025-12</option>
+<<<<<<< HEAD
            <option value="2025-11">2025-11</option>
           <option value="2026-01">2026-01</option>
           <option value="2026-02">2026-02</option>
@@ -150,12 +160,21 @@ const berichtePage = (function () {
           <option value="2026-04">2025-04</option>
           <option value="2026-05">2025-05</option>
           <option value="2026-06">2025-05</option>
+=======
+          <option value="2026-01">2026-01</option>
+          <option value="2026-02">2026-02</option>
+          <option value="2026-03">2026-03</option>
+          <option value="2026-04">2026-04</option>
+          <option value="2026-05">2026-05</option>
+          <option value="2026-06">2026-06</option>
+          <option value="2027-07">2027-07</option>
+>>>>>>> eb17abbedcf4a8620a0783e7b569e410f0cbe9c7
         </select>
       </div>
       <div class="b-card b-card-fullwidth" id="summe-chart-wrap" style="display:none">
         <canvas id="summeChart" height="110"></canvas>
       </div>
-      <div id="summe-empty" class="b-empty-state">Bitte wählen Sie eine Option aus.</div>
+      <div id="summe-empty" class="b-empty-state">Keine Daten verfügbar.</div>
     </div>
   `;
 
@@ -263,6 +282,141 @@ const berichtePage = (function () {
     document.head.appendChild(script);
   }
 
+  // ── Monthly totals fetch (Summe Netto) ───────────────────────────────────
+  async function fetchMonthlyTotals(bearbeiter = 'Alle') {
+    const SO = '/api/monthly_totals';
+    const REMOTE = 'https://goarrow.ai/test/fetch_monthly_totals.php';
+    const PROXY1 = `https://corsproxy.io/?${encodeURIComponent(REMOTE)}`;
+
+    const tryPostJson = async (url, body, timeoutMs = 2500) => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(body),
+          cache: 'no-store',
+          signal: ctrl.signal,
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      } finally { clearTimeout(t); }
+    };
+
+    const tryPostForm = async (url, body, timeoutMs = 2500) => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const params = new URLSearchParams();
+        Object.entries(body).forEach(([k,v]) => params.append(k, v ?? ''));
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+          body: params.toString(),
+          cache: 'no-store',
+          signal: ctrl.signal,
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      } finally { clearTimeout(t); }
+    };
+
+    const isLocal = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+    const candidates = isLocal
+      ? [() => tryPostForm(PROXY1, { bearbeiter }), () => tryPostForm(REMOTE, { bearbeiter }), () => tryPostJson(SO, { bearbeiter })]
+      : [() => tryPostJson(SO, { bearbeiter }), () => tryPostForm(REMOTE, { bearbeiter }), () => tryPostForm(PROXY1, { bearbeiter })];
+
+    let data = null; const errs = [];
+    for (const fn of candidates) {
+      try { data = await fn(); break; } catch (e) { errs.push(e.message); }
+    }
+    if (!data) { console.warn('Monthly totals fetch failed:', errs.join(' | ')); return []; }
+    const list = Array.isArray(data) ? data : (data.data || data.items || data.totals || []);
+
+    const toNumber = (val) => {
+      if (typeof val === 'number' && isFinite(val)) return val;
+      const s = String(val ?? '0').trim().replace(/[€\s]/g, '');
+      // If string ends with ",dd" it's EU decimal with thousand dots
+      if (/,\d{1,2}$/.test(s) && s.includes('.')) {
+        return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+      }
+      // Otherwise, treat commas as thousand separators and keep '.' decimals
+      return parseFloat(s.replace(/,/g, '')) || 0;
+    };
+
+    return (list || []).map(x => {
+      const label = x.month || x.monat || x.label || x.date || x.period || '';
+      const rawVal = x.total ?? x.sum ?? x.summe ?? x.summe_netto ?? 0;
+      const value = toNumber(rawVal);
+      return { label: String(label), value };
+    });
+  }
+
+  function populateMonthsDropdown() {
+    const sel = document.getElementById('b-summe-filter');
+    if (!sel) return;
+    const current = sel.value || '';
+
+    // Helper to build a continuous YYYY-MM range
+    const monthRange = (startYM, endYM) => {
+      const out = [];
+      const [sy, sm] = startYM.split('-').map(n => parseInt(n, 10));
+      const [ey, em] = endYM.split('-').map(n => parseInt(n, 10));
+      if (!sy || !sm || !ey || !em) return out;
+      let y = sy, m = sm;
+      while (y < ey || (y === ey && m <= em)) {
+        out.push(`${y.toString().padStart(4,'0')}-${m.toString().padStart(2,'0')}`);
+        m += 1;
+        if (m > 12) { m = 1; y += 1; }
+      }
+      return out;
+    };
+
+    // If Bearbeiter is "Alle", disable month selection entirely
+    if (currentFilter === 'Alle') {
+      sel.innerHTML = '<option value="">Wählen Sie eine Option sume...</option>';
+      sel.value = '';
+      sel.disabled = true;
+      // Also hide the chart/empty message via drawSumme()
+      return;
+    }
+
+    let labels = [];
+    if (Array.isArray(monthlyTotals) && monthlyTotals.length) {
+      const apiMonths = monthlyTotals.map(m => String(m.label)).filter(Boolean);
+      labels = Array.from(new Set(apiMonths)).sort();
+    }
+    if (!labels.length) {
+      // Build from available data (respect current Bearbeiter)
+      const scope = (currentFilter === 'Alle')
+        ? rawData
+        : rawData.filter(d => (d.bearbeiter || '—') === currentFilter);
+      const months = scope.map(d => String(d.monat || '').slice(0,7)).filter(Boolean);
+      const uniq = Array.from(new Set(months)).sort();
+      if (uniq.length) {
+        const min = uniq[0];
+        const max = uniq[uniq.length - 1];
+        labels = monthRange(min, max);
+      } else {
+        labels = [];
+      }
+    }
+
+    // Rebuild options: placeholder + Alle + months
+    sel.innerHTML = [
+      '<option value="">Wählen Sie eine Option sume...</option>',
+      '<option value="Alle">Alle</option>',
+      ...labels.map(m => `<option value="${m}">${m}</option>`)
+    ].join('');
+
+    // Restore selection if still present
+    if (current && Array.from(sel.options).some(o => o.value === current)) {
+      sel.value = current;
+    }
+    sel.disabled = false;
+  }
+
   // ── Chart helpers ─────────────────────────────────────────────────────────
   function destroyAll() {
     [qChart, qBarChart, sChart, sBarChart, gChart].forEach(c => c && c.destroy());
@@ -296,6 +450,7 @@ const berichtePage = (function () {
             grid: { display: false }
           },
           y: {
+            beginAtZero: true,
             ticks: { font: { size: 10 }, color: '#64748b' },
             grid: { color: '#f1f5f9' }
           }
@@ -386,29 +541,88 @@ const berichtePage = (function () {
   }
 
   function drawSumme() {
-    const sel = document.getElementById('b-summe-filter')?.value;
+    const sel = document.getElementById('b-summe-filter')?.value || '';
     const wrap  = document.getElementById('summe-chart-wrap');
     const empty = document.getElementById('summe-empty');
     const ctx   = document.getElementById('summeChart');
     if (!wrap || !empty || !ctx) return;
 
-    if (!sel) {
-      wrap.style.display  = 'none';
-      empty.style.display = 'block';
-      return;
+    // If Bearbeiter = Alle OR no month selected, show nothing
+    if (currentFilter === 'Alle' || !sel) { wrap.style.display='none'; empty.style.display='block'; return; }
+
+    // Helpers
+    function monthRange(startYM, endYM) {
+      const out = [];
+      const [sy, sm] = startYM.split('-').map(n => parseInt(n, 10));
+      const [ey, em] = endYM.split('-').map(n => parseInt(n, 10));
+      if (!sy || !sm || !ey || !em) return out;
+      let y = sy, m = sm;
+      while (y < ey || (y === ey && m <= em)) {
+        out.push(`${y.toString().padStart(4,'0')}-${m.toString().padStart(2,'0')}`);
+        m += 1;
+        if (m > 12) { m = 1; y += 1; }
+      }
+      return out;
+    }
+
+    // Build month labels helper (API preferred)
+    const apiMonths = Array.isArray(monthlyTotals) ? monthlyTotals.map(m => String(m.label)).filter(Boolean) : [];
+    let fullRangeLabels = Array.from(new Set(apiMonths)).sort();
+    if (!fullRangeLabels.length) {
+      const base = (currentFilter === 'Alle') ? rawData : rawData.filter(d => (d.bearbeiter || '—') === currentFilter);
+      const months = base.map(d => String(d.monat || '').slice(0,7)).filter(Boolean);
+      const uniq = Array.from(new Set(months)).sort();
+      if (uniq.length) {
+        const min = uniq[0];
+        const max = uniq[uniq.length - 1];
+        fullRangeLabels = monthRange(min, max);
+      } else {
+        fullRangeLabels = [];
+      }
+    }
+
+    // Fast lookup map for API totals
+    const apiMap = new Map((monthlyTotals || []).map(m => [String(m.label), Number(m.value || m.total || 0)]));
+
+    let labels = [];
+    let vals = [];
+
+    // Person selected: prefer API totals; fallback to leads
+    const useApi = apiMap.size > 0;
+    if (sel === 'Alle') {
+      labels = fullRangeLabels;
+      if (useApi) {
+        vals = labels.map(m => Number(apiMap.get(m) || 0));
+      } else {
+        const personLeads = rawData.filter(d => (d.bearbeiter || '—') === currentFilter);
+        vals = labels.map(mon => {
+          const list = personLeads.filter(d => (d.monat || '').startsWith(mon));
+          return list.reduce((acc, d) => acc + (d.summe || 0), 0);
+        });
+      }
+    } else {
+      labels = [sel];
+      if (useApi) {
+        vals = [Number(apiMap.get(sel) || 0)];
+      } else {
+        const personLeads = rawData.filter(d => (d.bearbeiter || '—') === currentFilter);
+        const list = personLeads.filter(d => (d.monat || '').startsWith(sel));
+        vals = [list.reduce((acc, d) => acc + (d.summe || 0), 0)];
+      }
     }
 
     wrap.style.display  = 'block';
     empty.style.display = 'none';
 
-    const data = filtered();
-    const grouped = sumBy(data, sel === 'quelle' ? 'quelle' : 'status');
-    const labels = Object.keys(grouped);
-    const vals   = labels.map(k => grouped[k]);
-
     // destroy previous summe chart if any
     if (ctx._chart) ctx._chart.destroy();
     const cfg = makeBarConfig(labels, vals, '#2d7a3a');
+    // Fixed y-axis slab: 200k, 400k, 600k, ... without year restriction
+    const step = 200000;
+    const maxVal = Math.max(0, ...vals);
+    const suggestedMax = Math.ceil((maxVal + step) / step) * step;
+    cfg.options.scales.y.ticks.stepSize = step;
+    cfg.options.scales.y.suggestedMax = suggestedMax;
     cfg.options.maintainAspectRatio = false;
     ctx.parentElement.style.height = '280px';
     ctx._chart = new Chart(ctx, cfg);
@@ -429,14 +643,35 @@ const berichtePage = (function () {
     loadChartJs(async () => {
       // Load live data
       rawData = await fetchLeadsForReports();
+      // Also fetch monthly totals (per-Bearbeiter, POST)
+      try {
+        monthlyTotals = await fetchMonthlyTotals('Alle');
+      } catch (_) { monthlyTotals = []; }
       currentFilter = 'Alle';
       const ddl = document.getElementById('b-year-filter');
       if (ddl) ddl.value = 'Alle';
+      // If monthly totals exist, prefer those to populate month dropdown
+      try { populateMonthsDropdown(); } catch (_) {}
       drawCharts();
+      // Summe Netto renders once a month and specific Bearbeiter are selected
 
       // Bearbeiter filter
-      document.getElementById('b-year-filter')?.addEventListener('change', (e) => {
+      document.getElementById('b-year-filter')?.addEventListener('change', async (e) => {
         currentFilter = e.target.value || 'Alle';
+        // Refresh monthly totals for the selected Bearbeiter and repopulate months
+        try {
+          monthlyTotals = await fetchMonthlyTotals(currentFilter);
+        } catch (_) { monthlyTotals = []; }
+        populateMonthsDropdown();
+        // If a person is selected, auto-select 'Alle' in the month dropdown
+        const mSel = document.getElementById('b-summe-filter');
+        if (mSel) {
+          if (currentFilter === 'Alle') {
+            mSel.value = '';
+          } else if ([...mSel.options].some(o => o.value === 'Alle')) {
+            mSel.value = 'Alle';
+          }
+        }
         drawCharts();
       });
 
