@@ -1032,9 +1032,7 @@ const leadsPage = (function () {
 
   function friendlyApiError(context, raw) {
     const msg = (raw || "").toString();
-    const isStaticLocal =
-      typeof location !== "undefined" &&
-      location.host.includes("localhost:5500");
+    const isStaticLocal = isStaticLocalHost();
     if (isStaticLocal && /501|Unsupported method|404/.test(msg)) {
       return `${context}: Lokaler Static-Server unterstützt /api nicht. Bitte 'vercel dev' starten oder über Proxy testen.`;
     }
@@ -1053,6 +1051,7 @@ const leadsPage = (function () {
   async function fetchViaProxy(proxyUrl) {
     const res = await fetch(proxyUrl, {
       headers: { Accept: "application/json" },
+      cache: "no-store",
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1061,12 +1060,24 @@ const leadsPage = (function () {
     return data;
   }
 
+  function isStaticLocalHost() {
+    return (
+      typeof location !== "undefined" &&
+      (location.protocol === "file:" ||
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || ""))
+    );
+  }
+
   async function fetchLeadsFromAPI() {
+    const cacheBust = `_ts=${Date.now()}`;
     // 0) Try same-origin API first (works on Vercel)
     try {
       console.log(`🔄 Trying same-origin API: ${SAME_ORIGIN_API}`);
-      const res = await fetch(SAME_ORIGIN_API, {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+      const sameOriginUrl = `${SAME_ORIGIN_API}?${cacheBust}`;
+      const res = await fetch(sameOriginUrl, {
         headers: { Accept: "application/json" },
+        cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -1081,7 +1092,7 @@ const leadsPage = (function () {
       );
     }
 
-    const targetUrl = `${EXTERNAL_API_URL}`;
+    const targetUrl = `${EXTERNAL_API_URL}?${cacheBust}`;
 
     const proxies = [
       `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
@@ -1105,6 +1116,7 @@ const leadsPage = (function () {
       const directResponse = await fetch(targetUrl, {
         headers: { Accept: "application/json" },
         mode: "cors",
+        cache: "no-store",
       });
       if (!directResponse.ok) throw new Error(`HTTP ${directResponse.status}`);
       const directData = await directResponse.json();
@@ -1200,12 +1212,32 @@ const leadsPage = (function () {
     }
   }
 
+function normalizeUpdateResponse(data, rawText = "") {
+  const raw = String(rawText || "").trim();
+  if (
+    data === false ||
+    data == null ||
+    data?.success === false ||
+    data?.status === false ||
+    String(data?.status || "").toLowerCase() === "error" ||
+    raw.toLowerCase() === "false"
+  ) {
+    throw new Error(data?.message || data?.error || raw || "Backend returned false");
+  }
+  return data;
+}
+
 async function updateLeadOnAPI(id, payload) {
-  // Map your frontend field names to PHP API field names
+  const leadId = String(id ?? payload?.lead_id ?? payload?.id ?? "").trim();
+  if (!leadId || leadId === "null" || leadId === "undefined") {
+    throw new Error("Lead ID fehlt");
+  }
+
   const mappedPayload = {
-    id: String(id),
+    id: leadId,
+    lead_id: leadId,
     status: payload.status,
-    sale_type: payload.sale_typ,
+    sale_typ: payload.sale_typ,
     bearbeiter: payload.bearbeiter,
     name: payload.name,
     salutation: payload.salutation,
@@ -1229,25 +1261,33 @@ async function updateLeadOnAPI(id, payload) {
     dachpfanne: payload.dachpfanne,
     baujahr_dach: payload.baujahr_dach,
     zusaetzliche_extras: payload.zusaetzliche_extras,
+    kategorie: payload.kategorie,
   };
 
-  // Remove undefined values
-  Object.keys(mappedPayload).forEach(key => {
+  Object.keys(mappedPayload).forEach((key) => {
     if (mappedPayload[key] === undefined || mappedPayload[key] === null) {
       delete mappedPayload[key];
     }
   });
 
-  console.log('Sending update payload:', mappedPayload);
+  console.log("Sending update payload:", mappedPayload);
+
+  const formParams = new URLSearchParams();
+  Object.entries(mappedPayload).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      formParams.append(key, String(value));
+    }
+  });
 
   try {
-    // Use your Node.js handler as a proxy (NO CORS ISSUE)
-    const response = await fetch('/api/update_lead', {
-      method: 'POST',
+    if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+    const response = await fetch(UPDATE_API_SAME, {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
+        Accept: "application/json",
       },
-      body: JSON.stringify(mappedPayload), // Send as JSON
+      body: JSON.stringify(mappedPayload),
     });
 
     if (!response.ok) {
@@ -1255,13 +1295,79 @@ async function updateLeadOnAPI(id, payload) {
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
-    const data = await response.json();
-    console.log('Update response:', data);
+    const data = normalizeUpdateResponse(await response.json());
+    console.log("Update response:", data);
     return data;
-    
   } catch (error) {
-    console.error('Update failed:', error);
-    throw new Error(`Update failed: ${error.message}`);
+    if (isStaticLocalHost()) {
+      console.log("Skipping same-origin update on static localhost");
+    } else {
+      console.warn(
+        "Update via same-origin failed, trying direct (may hit CORS locally)",
+        error.message,
+      );
+    }
+  }
+
+  if (!isStaticLocalHost()) {
+    try {
+      const response = await fetch(UPDATE_API_DIRECT, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formParams,
+        mode: "cors",
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { status: "success", raw: text };
+      }
+      return normalizeUpdateResponse(data, text);
+    } catch (error) {
+      console.warn("Direct update failed, trying proxy", error.message);
+    }
+  } else {
+    console.log("Skipping direct update on static localhost; using proxy");
+  }
+
+  try {
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(UPDATE_API_DIRECT)}`;
+    const response = await fetch(proxyUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formParams,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { status: "success", raw: text };
+    }
+    return normalizeUpdateResponse(data, text);
+  } catch (error) {
+    console.error("Update failed:", error);
+    throw new Error(friendlyApiError("Update fehlgeschlagen", error.message));
   }
 }
 
@@ -2350,11 +2456,17 @@ async function updateLeadOnAPI(id, payload) {
 // In your form submit handler for update:
 if (currentEditId) {
   try {
+    const editId = String(currentEditId).trim();
+    if (!editId || editId === "null" || editId === "undefined") {
+      throw new Error("Lead ID fehlt");
+    }
+
     const data = collectForm();
     
     // Map to correct field names for PHP API
     const payload = {
-      id: String(currentEditId),  // Important: use "id" not "lead_id"
+      id: editId,
+      lead_id: editId,
       name: data.name,
       salutation: data.salutation,
       erstberatung_telefon: data.briefberatungTelefon,
@@ -2380,15 +2492,25 @@ if (currentEditId) {
       baujahr_dach: data.baujahr,
       zusaetzliche_extras: data.zusatzExtras,
       sale_typ: data.salesTyp,
+      kategorie: data.kategorie,
     };
     
-    closePanel();
     showToast("Updating lead...", "info", 1000);
     
     // Call the update function
-    const response = await updateLeadOnAPI(currentEditId, payload);
+    const response = await updateLeadOnAPI(editId, payload);
     console.log("Update response:", response);
-    
+
+    const rowsUpdated = Number(response?.rows_updated);
+    if (false && Number.isFinite(rowsUpdated) && rowsUpdated === 0) {
+      closePanel();
+      showToast("Keine geänderten Werte gespeichert", "info", 2500);
+      await refreshLeads();
+      return;
+    }
+
+    updateLead(editId, data);
+    closePanel();
     showToast("Lead updated successfully!", "success", 2000);
     await refreshLeads();
     
