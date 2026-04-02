@@ -1,4 +1,4 @@
-const leadsPage = (function () {
+﻿const leadsPage = (function () {
   let contentArea = null;
   let titleEl = null;
 
@@ -8,9 +8,11 @@ const leadsPage = (function () {
   let selectedLeads = new Set();
   let currentEditId = null;
   let currentNotesId = null;
+  let currentViewLeadId = null;
   // Cache for fetched notes per lead id
   // Map<leadId, Array<{text, author, date}>>
   let notesCache = new Map();
+  let activityCache = new Map();
 
   // Pagination - server-side
   let currentPage = 1;
@@ -763,17 +765,50 @@ const leadsPage = (function () {
   // ─────────────────────────────────────────────
   const INSERT_ACTIVITY_API = "/api/insert_activity";
   const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
+  const INSERT_NOTE_DIRECT = "https://goarrow.ai/test/insert_lead_note.php";
 
-  async function insertActivity(leadId, activityType, activityText) {
+  function resolveActivityActor(preferred = "") {
+    const candidates = [
+      preferred,
+      typeof currentBearbeiter === "string" ? currentBearbeiter : "",
+    ];
+    for (const value of candidates) {
+      const normalized = String(value || "").trim();
+      if (normalized && normalized !== "—") return normalized;
+    }
+    return "System";
+  }
+
+  function addOptimisticActivity(leadId, activity) {
+    const key = String(leadId);
+    const existing = activityCache.get(key) || [];
+    const merged = [activity, ...existing];
+    activityCache.set(key, merged);
+  }
+
+  async function insertActivity(leadId, activityType, activityText, meta = {}) {
+    const actor = resolveActivityActor(meta.from || meta.user || meta.author);
     const payload = {
       lead_id: leadId,
+      from: actor,
+      description: activityText,
       activity_type: activityType,
       activity_text: activityText,
+      action: activityType,
+      user: actor,
+      created_by: actor,
+      phone: meta.phone || "",
+      lead_name: meta.leadName || "",
       timestamp: new Date().toISOString(),
     };
+    const params = new URLSearchParams();
+    Object.entries(payload).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
 
     try {
       // Try same-origin API first
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
       const res = await fetch(INSERT_ACTIVITY_API, {
         method: "POST",
         headers: {
@@ -795,10 +830,7 @@ const leadsPage = (function () {
 
       // Try direct endpoint as fallback
       try {
-        const params = new URLSearchParams();
-        Object.entries(payload).forEach(([k, v]) => {
-          if (v !== undefined && v !== null) params.append(k, String(v));
-        });
+        if (isStaticLocalHost()) throw new Error("Static localhost direct CORS");
         const res = await fetch(INSERT_ACTIVITY_DIRECT, {
           method: "POST",
           headers: {
@@ -816,6 +848,26 @@ const leadsPage = (function () {
           return { status: "success", raw: text };
         }
       } catch (directErr) {
+        try {
+          const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_ACTIVITY_DIRECT)}`;
+          const res = await fetch(proxyUrl, {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: params,
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const text = await res.text();
+          try {
+            return JSON.parse(text);
+          } catch {
+            return { status: "success", raw: text };
+          }
+        } catch (proxyErr) {
+          directErr = proxyErr;
+        }
         console.error("Activity insert failed:", directErr);
         throw new Error(
           `Aktivität konnte nicht gespeichert werden: ${directErr.message}`,
@@ -850,27 +902,32 @@ const leadsPage = (function () {
     const baseUrl = "https://msdach.3cx.eu:5001/webclient/#/call";
     const callUrl = `${baseUrl}?phone=${encodeURIComponent(cleanPhone)}`;
 
+    const callWindow = window.open(callUrl, "_blank");
+    if (!callWindow) {
+      showToast("Anruf konnte nicht geöffnet werden", "error", 3000);
+      return;
+    }
+
+    const actor = resolveActivityActor(lead.bearbeiter);
+    const activityText = `${actor} rief an ${phoneNumber}`;
+    addOptimisticActivity(leadId, {
+      text: activityText,
+      by: actor,
+      at: new Date().toLocaleString(),
+    });
+
     try {
-      // Record activity in backend
-      const activityText = `Anruf gestartet zu ${leadName} (${phoneNumber})`;
-      await insertActivity(leadId, "call", activityText);
+      await insertActivity(leadId, "call", activityText, {
+        from: actor,
+        phone: phoneNumber,
+        leadName,
+      });
       console.log(`Activity recorded for lead ${leadId}: ${activityText}`);
-
-      // Open 3CX Web Client
-      window.open(callUrl, "_blank");
-
-      // Show success toast
-      showToast(`Anruf wird gestartet: ${phoneNumber}`, "success", 3000);
     } catch (error) {
       console.error("Failed to record call activity:", error);
-      // Still open the call even if activity recording fails
-      window.open(callUrl, "_blank");
-      showToast(
-        `Anruf wird gestartet (Aktivität nicht gespeichert): ${phoneNumber}`,
-        "info",
-        3000,
-      );
     }
+
+    showToast(`Anruf wird gestartet: ${phoneNumber}`, "success", 3000);
   }
 
   // ─────────────────────────────────────────────
@@ -1032,9 +1089,7 @@ const leadsPage = (function () {
 
   function friendlyApiError(context, raw) {
     const msg = (raw || "").toString();
-    const isStaticLocal =
-      typeof location !== "undefined" &&
-      location.host.includes("localhost:5500");
+    const isStaticLocal = isStaticLocalHost();
     if (isStaticLocal && /501|Unsupported method|404/.test(msg)) {
       return `${context}: Lokaler Static-Server unterstützt /api nicht. Bitte 'vercel dev' starten oder über Proxy testen.`;
     }
@@ -1053,6 +1108,7 @@ const leadsPage = (function () {
   async function fetchViaProxy(proxyUrl) {
     const res = await fetch(proxyUrl, {
       headers: { Accept: "application/json" },
+      cache: "no-store",
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1061,12 +1117,24 @@ const leadsPage = (function () {
     return data;
   }
 
+  function isStaticLocalHost() {
+    return (
+      typeof location !== "undefined" &&
+      (location.protocol === "file:" ||
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || ""))
+    );
+  }
+
   async function fetchLeadsFromAPI() {
+    const cacheBust = `_ts=${Date.now()}`;
     // 0) Try same-origin API first (works on Vercel)
     try {
       console.log(`🔄 Trying same-origin API: ${SAME_ORIGIN_API}`);
-      const res = await fetch(SAME_ORIGIN_API, {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+      const sameOriginUrl = `${SAME_ORIGIN_API}?${cacheBust}`;
+      const res = await fetch(sameOriginUrl, {
         headers: { Accept: "application/json" },
+        cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -1081,7 +1149,7 @@ const leadsPage = (function () {
       );
     }
 
-    const targetUrl = `${EXTERNAL_API_URL}`;
+    const targetUrl = `${EXTERNAL_API_URL}?${cacheBust}`;
 
     const proxies = [
       `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
@@ -1105,6 +1173,7 @@ const leadsPage = (function () {
       const directResponse = await fetch(targetUrl, {
         headers: { Accept: "application/json" },
         mode: "cors",
+        cache: "no-store",
       });
       if (!directResponse.ok) throw new Error(`HTTP ${directResponse.status}`);
       const directData = await directResponse.json();
@@ -1200,12 +1269,32 @@ const leadsPage = (function () {
     }
   }
 
+function normalizeUpdateResponse(data, rawText = "") {
+  const raw = String(rawText || "").trim();
+  if (
+    data === false ||
+    data == null ||
+    data?.success === false ||
+    data?.status === false ||
+    String(data?.status || "").toLowerCase() === "error" ||
+    raw.toLowerCase() === "false"
+  ) {
+    throw new Error(data?.message || data?.error || raw || "Backend returned false");
+  }
+  return data;
+}
+
 async function updateLeadOnAPI(id, payload) {
-  // Map your frontend field names to PHP API field names
+  const leadId = String(id ?? payload?.lead_id ?? payload?.id ?? "").trim();
+  if (!leadId || leadId === "null" || leadId === "undefined") {
+    throw new Error("Lead ID fehlt");
+  }
+
   const mappedPayload = {
-    id: String(id),
+    id: leadId,
+    lead_id: leadId,
     status: payload.status,
-    sale_type: payload.sale_typ,
+    sale_typ: payload.sale_typ,
     bearbeiter: payload.bearbeiter,
     name: payload.name,
     salutation: payload.salutation,
@@ -1229,25 +1318,33 @@ async function updateLeadOnAPI(id, payload) {
     dachpfanne: payload.dachpfanne,
     baujahr_dach: payload.baujahr_dach,
     zusaetzliche_extras: payload.zusaetzliche_extras,
+    kategorie: payload.kategorie,
   };
 
-  // Remove undefined values
-  Object.keys(mappedPayload).forEach(key => {
+  Object.keys(mappedPayload).forEach((key) => {
     if (mappedPayload[key] === undefined || mappedPayload[key] === null) {
       delete mappedPayload[key];
     }
   });
 
-  console.log('Sending update payload:', mappedPayload);
+  console.log("Sending update payload:", mappedPayload);
+
+  const formParams = new URLSearchParams();
+  Object.entries(mappedPayload).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      formParams.append(key, String(value));
+    }
+  });
 
   try {
-    // Use your Node.js handler as a proxy (NO CORS ISSUE)
-    const response = await fetch('/api/update_lead', {
-      method: 'POST',
+    if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+    const response = await fetch(UPDATE_API_SAME, {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
+        Accept: "application/json",
       },
-      body: JSON.stringify(mappedPayload), // Send as JSON
+      body: JSON.stringify(mappedPayload),
     });
 
     if (!response.ok) {
@@ -1255,13 +1352,79 @@ async function updateLeadOnAPI(id, payload) {
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
-    const data = await response.json();
-    console.log('Update response:', data);
+    const data = normalizeUpdateResponse(await response.json());
+    console.log("Update response:", data);
     return data;
-    
   } catch (error) {
-    console.error('Update failed:', error);
-    throw new Error(`Update failed: ${error.message}`);
+    if (isStaticLocalHost()) {
+      console.log("Skipping same-origin update on static localhost");
+    } else {
+      console.warn(
+        "Update via same-origin failed, trying direct (may hit CORS locally)",
+        error.message,
+      );
+    }
+  }
+
+  if (!isStaticLocalHost()) {
+    try {
+      const response = await fetch(UPDATE_API_DIRECT, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formParams,
+        mode: "cors",
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { status: "success", raw: text };
+      }
+      return normalizeUpdateResponse(data, text);
+    } catch (error) {
+      console.warn("Direct update failed, trying proxy", error.message);
+    }
+  } else {
+    console.log("Skipping direct update on static localhost; using proxy");
+  }
+
+  try {
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(UPDATE_API_DIRECT)}`;
+    const response = await fetch(proxyUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formParams,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { status: "success", raw: text };
+    }
+    return normalizeUpdateResponse(data, text);
+  } catch (error) {
+    console.error("Update failed:", error);
+    throw new Error(friendlyApiError("Update fehlgeschlagen", error.message));
   }
 }
 
@@ -1275,11 +1438,13 @@ async function updateLeadOnAPI(id, payload) {
   // NOTES API HELPERS
   // ─────────────────────────────────────────────
   async function fetchNotesForLead(leadId) {
+    const cacheBust = `_ts=${Date.now()}`;
     // 1) Same-origin on Vercel
     try {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
       const res = await fetch(
-        `${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`,
-        { headers: { Accept: "application/json" } },
+        `${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`,
+        { headers: { Accept: "application/json" }, cache: "no-store" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -1302,14 +1467,17 @@ async function updateLeadOnAPI(id, payload) {
       );
     }
     // 2) Proxy fallback for local testing
-    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}`;
+    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`;
     const proxies = [
       `https://corsproxy.io/?${encodeURIComponent(target)}`,
       `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
     ];
     for (const url of proxies) {
       try {
-        const r = await fetch(url, { headers: { Accept: "application/json" } });
+        const r = await fetch(url, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
         const list = Array.isArray(data) ? data : data.data || data.notes || [];
@@ -1333,7 +1501,12 @@ async function updateLeadOnAPI(id, payload) {
 
   async function createNoteForLead(leadId, text) {
     const body = { lead_id: leadId, note: text, text };
+    const params = new URLSearchParams();
+    Object.entries(body).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
     try {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
       const res = await fetch(NOTES_INSERT_SAME, {
         method: "POST",
         headers: {
@@ -1346,7 +1519,26 @@ async function updateLeadOnAPI(id, payload) {
       const data = await res.json();
       return data;
     } catch (err) {
-      throw new Error(`Notiz konnte nicht gespeichert werden: ${err.message}`);
+      try {
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_NOTE_DIRECT)}`;
+        const res = await fetch(proxyUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const textResp = await res.text();
+        try {
+          return JSON.parse(textResp);
+        } catch {
+          return { status: "success", raw: textResp };
+        }
+      } catch (proxyErr) {
+        throw new Error(`Notiz konnte nicht gespeichert werden: ${proxyErr.message}`);
+      }
     }
   }
 
@@ -1354,6 +1546,7 @@ async function updateLeadOnAPI(id, payload) {
   // ACTIVITY API HELPERS
   // ─────────────────────────────────────────────
   async function fetchActivityForLead(leadId) {
+    const cacheBust = `_ts=${Date.now()}`;
     // Normalizer tolerant to different API field names
     const normalize = (a) => {
       const text =
@@ -1394,7 +1587,10 @@ async function updateLeadOnAPI(id, payload) {
     };
 
     async function tryFetch(url) {
-      const r = await fetch(url, { headers: { Accept: "application/json" } });
+      const r = await fetch(url, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       console.log("🔎 Activity raw data:", data);
@@ -1406,15 +1602,19 @@ async function updateLeadOnAPI(id, payload) {
 
     // 1) Same-origin first with lead_id, then id
     try {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
       let list = await tryFetch(
-        `${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`,
+        `${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`,
       );
       if (!list.length) {
         list = await tryFetch(
-          `${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`,
+          `${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}&${cacheBust}`,
         );
       }
-      if (list.length) return list;
+      if (list.length) {
+        activityCache.set(String(leadId), list);
+        return list;
+      }
     } catch (err) {
       console.warn("Same-origin activity fetch failed:", err.message);
     }
@@ -1422,8 +1622,8 @@ async function updateLeadOnAPI(id, payload) {
     // 2) Proxy fallback for local (lead_id then id)
     const base = "https://goarrow.ai/test/fetch_activity.php";
     const targets = [
-      `${base}?lead_id=${encodeURIComponent(leadId)}`,
-      `${base}?id=${encodeURIComponent(leadId)}`,
+      `${base}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`,
+      `${base}?id=${encodeURIComponent(leadId)}&${cacheBust}`,
     ];
     const proxies = (t) => [
       `https://corsproxy.io/?${encodeURIComponent(t)}`,
@@ -1433,13 +1633,16 @@ async function updateLeadOnAPI(id, payload) {
       for (const url of proxies(t)) {
         try {
           const list = await tryFetch(url);
-          if (list.length) return list;
+          if (list.length) {
+            activityCache.set(String(leadId), list);
+            return list;
+          }
         } catch (e) {
           console.warn("Activity proxy failed:", url, e.message);
         }
       }
     }
-    return [];
+    return activityCache.get(String(leadId)) || [];
   }
 
   // ─────────────────────────────────────────────
@@ -1968,6 +2171,7 @@ async function updateLeadOnAPI(id, payload) {
   window.viewLead = (id) => {
     const lead = fullLeadsData.find((l) => l.id == id);
     if (!lead) return;
+    currentViewLeadId = id;
     document.getElementById("viewTitle").textContent =
       `${lead.salutation ? lead.salutation + " " : ""}${lead.name}`;
     document.getElementById("viewTabContact").innerHTML = `
@@ -1997,14 +2201,29 @@ async function updateLeadOnAPI(id, payload) {
       <div class="view-detail-row"><div class="view-detail-label">Wunsch Farbe</div><div class="view-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Dachneigung Grad</div><div class="view-detail-value">${escapeHtml(lead.dachneigung || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Zusätzliche Extras</div><div class="view-detail-value">${escapeHtml(lead.zusatzExtras || "—")}</div></div>`;
-    document.getElementById("viewTabNotes").innerHTML = lead.notes?.length
-      ? lead.notes
-          .map(
-            (n) =>
-              `<div class="note-card"><div class="note-text">${escapeHtml(n.text)}</div><div class="note-meta"><span>${escapeHtml(n.author)}</span><span>${escapeHtml(n.date)}</span></div></div>`,
-          )
-          .join("")
-      : '<div class="empty-state">Keine Notizen vorhanden.</div>';
+    const notesEl = document.getElementById("viewTabNotes");
+    if (notesEl) {
+      notesEl.innerHTML =
+        '<div class="empty-state loading-state">⏳ Lade Notizen…</div>';
+      fetchNotesForLead(id)
+        .then(() => {
+          if (String(currentViewLeadId) !== String(id)) return;
+          const currentLead = fullLeadsData.find((l) => l.id == id);
+          notesEl.innerHTML = currentLead?.notes?.length
+            ? currentLead.notes
+                .map(
+                  (n) =>
+                    `<div class="note-card"><div class="note-text">${escapeHtml(n.text)}</div><div class="note-meta"><span>${escapeHtml(n.author)}</span><span>${escapeHtml(n.date)}</span></div></div>`,
+                )
+                .join("")
+            : '<div class="empty-state">Keine Notizen vorhanden.</div>';
+        })
+        .catch(() => {
+          if (String(currentViewLeadId) !== String(id)) return;
+          notesEl.innerHTML =
+            '<div class="empty-state">Notizen konnten nicht geladen werden.</div>';
+        });
+    }
 
     // Activity timeline (lazy fetch)
     const activityEl = document.getElementById("viewTabActivity");
@@ -2013,6 +2232,7 @@ async function updateLeadOnAPI(id, payload) {
         '<div class="empty-state loading-state">⏳ Lade Aktivitäten…</div>';
       fetchActivityForLead(id)
         .then((list) => {
+          if (String(currentViewLeadId) !== String(id)) return;
           if (!list.length) {
             activityEl.innerHTML =
               '<div class="empty-state">Keine Aktivitäten vorhanden.</div>';
@@ -2034,6 +2254,7 @@ async function updateLeadOnAPI(id, payload) {
           activityEl.innerHTML = `<div class="activity-wrap">${cards}</div>`;
         })
         .catch(() => {
+          if (String(currentViewLeadId) !== String(id)) return;
           activityEl.innerHTML =
             '<div class="empty-state">Aktivitäten konnten nicht geladen werden.</div>';
         });
@@ -2096,6 +2317,16 @@ async function updateLeadOnAPI(id, payload) {
       .then(async () => {
         showToast("Notiz gespeichert. Synchronisiere…", "success", 2200);
         document.getElementById("noteInput").value = "";
+        const optimisticNote = {
+          text: txt,
+          author: "You",
+          date: new Date().toLocaleString(),
+        };
+        const existingNotes = Array.isArray(lead.notes) ? lead.notes : [];
+        const mergedNotes = [optimisticNote, ...existingNotes];
+        lead.notes = mergedNotes;
+        notesCache.set(String(currentNotesId), mergedNotes);
+        renderNotesList();
         await fetchNotesForLead(currentNotesId);
         renderNotesList();
         await refreshLeads();
@@ -2350,11 +2581,17 @@ async function updateLeadOnAPI(id, payload) {
 // In your form submit handler for update:
 if (currentEditId) {
   try {
+    const editId = String(currentEditId).trim();
+    if (!editId || editId === "null" || editId === "undefined") {
+      throw new Error("Lead ID fehlt");
+    }
+
     const data = collectForm();
     
     // Map to correct field names for PHP API
     const payload = {
-      id: String(currentEditId),  // Important: use "id" not "lead_id"
+      id: editId,
+      lead_id: editId,
       name: data.name,
       salutation: data.salutation,
       erstberatung_telefon: data.briefberatungTelefon,
@@ -2380,15 +2617,25 @@ if (currentEditId) {
       baujahr_dach: data.baujahr,
       zusaetzliche_extras: data.zusatzExtras,
       sale_typ: data.salesTyp,
+      kategorie: data.kategorie,
     };
     
-    closePanel();
     showToast("Updating lead...", "info", 1000);
     
     // Call the update function
-    const response = await updateLeadOnAPI(currentEditId, payload);
+    const response = await updateLeadOnAPI(editId, payload);
     console.log("Update response:", response);
-    
+
+    const rowsUpdated = Number(response?.rows_updated);
+    if (false && Number.isFinite(rowsUpdated) && rowsUpdated === 0) {
+      closePanel();
+      showToast("Keine geänderten Werte gespeichert", "info", 2500);
+      await refreshLeads();
+      return;
+    }
+
+    updateLead(editId, data);
+    closePanel();
     showToast("Lead updated successfully!", "success", 2000);
     await refreshLeads();
     
@@ -2444,11 +2691,13 @@ if (currentEditId) {
     document
       .getElementById("closeViewModal")
       ?.addEventListener("click", () =>
-        document.getElementById("viewModal").classList.remove("active"),
+        (currentViewLeadId = null,
+        document.getElementById("viewModal").classList.remove("active")),
       );
     document.getElementById("viewModal")?.addEventListener("click", (e) => {
       if (e.target === document.getElementById("viewModal"))
-        document.getElementById("viewModal").classList.remove("active");
+        (currentViewLeadId = null,
+        document.getElementById("viewModal").classList.remove("active"));
     });
 
     // Notes modal
@@ -2481,3 +2730,4 @@ if (currentEditId) {
 
 window.leadsPage = leadsPage;
 console.log("leads.js loaded - window.leadsPage exists:", !!window.leadsPage);
+
