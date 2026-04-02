@@ -91,6 +91,13 @@
           <option value="Martin">Martin</option>
           <option value="Simon">Simon</option>
           </select>
+          <select class="select-box" id="filter-delegieren">
+          <option value="">Alle delegieren</option>
+          <option value="philipp">Philipp</option>
+          <option value="andré">André</option>
+          <option value="martin">Martin</option>
+          <option value="simon">Simon</option>
+          </select>
         <div class="spacer"></div>
         <button class="btn-primary" id="new-lead-btn">
           <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -2056,6 +2063,7 @@ async function updateLeadOnAPI(id, payload) {
     currentQuelle = document.getElementById("filter-quelle")?.value || "";
     currentBearbeiter =
       document.getElementById("filter-bearbeiter")?.value || ""; // Add this line
+      document.getElementById("filter-delegieren")?.value || ""; // Add this line
     currentPage = 1;
     loadPage(1);
   }
