@@ -33,6 +33,9 @@ const kundenPage = (function () {
   let leadSourceFilter = "";
   let ortSearchTerm = "";
 
+  // Store teleconsultation selections for each lead
+  let teleconsultationSelections = new Map(); // key: leadId, value: 'true' or 'false'
+
   const STATUS_MAPPING = {
     Offen: "Offen",
     "follow up": "follow up",
@@ -49,6 +52,14 @@ const kundenPage = (function () {
     Ghoster: "Ghoster",
     Storniert: "Storniert",
   };
+
+  // Status options for edit modal
+  const EDIT_STATUS_OPTIONS = [
+    "in Bearbeitung",
+    "Offen",
+    "Nur Info eingeholt",
+    "falscher Kunde"
+  ];
 
   function httpGetJson(url, controller) {
     return fetch(url, {
@@ -91,6 +102,10 @@ const kundenPage = (function () {
   }
 
   async function fetchNotesForLead(leadId) {
+    if (notesCache.has(String(leadId))) {
+      return notesCache.get(String(leadId));
+    }
+    
     try {
       const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`, { 
         headers: { Accept: 'application/json' } 
@@ -104,8 +119,6 @@ const kundenPage = (function () {
         date: String(n.date || n.created_at || '') 
       }));
       notesCache.set(String(leadId), normalized);
-      const idx = leadsData.findIndex(l => String(l.id) === String(leadId));
-      if (idx !== -1) leadsData[idx].notes = normalized;
       return normalized;
     } catch (err) {
       console.warn('Same-origin notes fetch failed, trying proxies:', err.message);
@@ -128,8 +141,6 @@ const kundenPage = (function () {
           date: String(n.date || n.created_at || '') 
         }));
         notesCache.set(String(leadId), normalized);
-        const idx = leadsData.findIndex(l => String(l.id) === String(leadId));
-        if (idx !== -1) leadsData[idx].notes = normalized;
         return normalized;
       } catch (e) {
         console.warn('Notes proxy failed:', url, e.message);
@@ -139,6 +150,10 @@ const kundenPage = (function () {
   }
 
   async function fetchActivityForLead(leadId) {
+    if (activityCache.has(String(leadId))) {
+      return activityCache.get(String(leadId));
+    }
+    
     const normalize = (a) => {
       const text = a.text || a.activity || a.action || a.event || a.message || a.desc || a.description || '';
       const by = a.from || a.by || a.user || a.username || a.author || a.created_by || 'System';
@@ -155,7 +170,6 @@ const kundenPage = (function () {
       const r = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
-      console.log('🔎 Activity raw data:', data);
       const list = Array.isArray(data) ? data : (data.data || data.activity || data.items || []);
       return (list || []).map(normalize);
     }
@@ -284,7 +298,7 @@ const kundenPage = (function () {
       .catch((e) => {
         console.error("Leads load failed", e);
         if (tbody) {
-          tbody.innerHTML = `|<td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div>`;
+          tbody.innerHTML = `<td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div>`;
         }
       })
       .finally(() => {
@@ -301,9 +315,7 @@ const kundenPage = (function () {
       });
   }
 
-  // Populate filter dropdowns with unique values
   function populateFilterOptions() {
-    // Get unique statuses
     const uniqueStatuses = [...new Set(leadsData.map(lead => lead.status).filter(s => s && s !== "—"))];
     const statusSelect = document.getElementById("filter-status");
     if (statusSelect) {
@@ -311,7 +323,6 @@ const kundenPage = (function () {
         uniqueStatuses.map(status => `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`).join('');
     }
     
-    // Get unique lead sources
     const uniqueSources = [...new Set(leadsData.map(lead => lead.quelle).filter(s => s && s !== "—"))];
     const sourceSelect = document.getElementById("filter-source");
     if (sourceSelect) {
@@ -320,12 +331,10 @@ const kundenPage = (function () {
     }
   }
 
-  // Apply all filters
   function applyFilters() {
     renderKunden();
   }
 
-  // Reset all filters
   function resetFilters() {
     statusFilter = "";
     leadSourceFilter = "";
@@ -585,245 +594,177 @@ const kundenPage = (function () {
     modal.classList.add('active');
   }
 
-  function renderKunden() {
-    if (!leadsData.length) {
-      renderStats();
-      return;
-    }
-
-    renderStats();
-
-    const statDefs = getStatDefinitions();
-    const activeDef = statDefs.find((d) => d.key === kundenActiveFilter);
-
-    const pillEl = document.getElementById("kunden-filter-pill");
-    if (pillEl) {
-      if (activeDef) {
-        pillEl.style.display = "block";
-        pillEl.innerHTML = `<span class="active-filter-pill">
-          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-          Gefiltert: ${activeDef.label}
-          <button onclick="window.clearKundenFilter()" title="Filter entfernen">✕</button>
-        </span>`;
-      } else {
-        pillEl.style.display = "none";
+  // Function to open teleconsultation modal when checkbox is clicked
+  function openTeleconsultationModal(leadId, checkboxElement) {
+    const lead = leadsData.find(l => l.id === leadId);
+    if (!lead) return;
+    
+    const currentSelection = teleconsultationSelections.get(leadId) || '';
+    
+    const modalHtml = `
+      <div id="teleconsultationModal" class="k-modal-overlay">
+        <div class="k-modal-content" style="max-width: 500px;">
+          <div class="k-modal-header">
+            <h3>Erstberatung Telefon</h3>
+            <button class="k-close-btn" id="closeTeleModal">&times;</button>
+          </div>
+          <div class="k-modal-body">
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Wählen Sie eine Option:</label>
+              <select id="teleconsultationSelect" class="k-full-select">
+                <option value="">Bitte wählen</option>
+                <option value="true" ${currentSelection === 'true' ? 'selected' : ''}>WAHR</option>
+                <option value="false" ${currentSelection === 'false' ? 'selected' : ''}>FALSCH</option>
+              </select>
+            </div>
+            
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+              <button type="button" id="cancelTeleModal" class="k-btn-outline" style="padding: 10px 24px;">Abbrechen</button>
+              <button type="button" id="updateTeleconsultation" class="k-btn-green" style="padding: 10px 24px;">Aktualisierung Beratung</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    const existingModal = document.getElementById("teleconsultationModal");
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById("teleconsultationModal");
+    const closeBtn = document.getElementById("closeTeleModal");
+    const cancelBtn = document.getElementById("cancelTeleModal");
+    const updateBtn = document.getElementById("updateTeleconsultation");
+    
+    const closeModal = () => {
+      modal.classList.remove('active');
+      setTimeout(() => modal.remove(), 300);
+    };
+    
+    closeBtn?.addEventListener('click', closeModal);
+    cancelBtn?.addEventListener('click', closeModal);
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+    
+    updateBtn?.addEventListener('click', () => {
+      const selectedValue = document.getElementById("teleconsultationSelect")?.value;
+      
+      if (selectedValue === 'true') {
+        // Check the checkbox
+        if (checkboxElement && !checkboxElement.checked) {
+          checkboxElement.checked = true;
+          selectedKunden.add(leadId);
+          updateCount();
+          updateMassEmailButton();
+        }
+        
+        // Enable edit for this lead
+        const editCheckbox = document.querySelector(`.edit-cb[data-id="${leadId}"]`);
+        if (editCheckbox && !editCheckbox.checked) {
+          editCheckbox.checked = true;
+          checkedEdit.add(leadId);
+          const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
+          if (editBtn) editBtn.disabled = false;
+        }
+        teleconsultationSelections.set(leadId, 'true');
+      } else if (selectedValue === 'false') {
+        // Uncheck the checkbox
+        if (checkboxElement && checkboxElement.checked) {
+          checkboxElement.checked = false;
+          selectedKunden.delete(leadId);
+          updateCount();
+          updateMassEmailButton();
+        }
+        
+        // Disable edit for this lead
+        const editCheckbox = document.querySelector(`.edit-cb[data-id="${leadId}"]`);
+        if (editCheckbox && editCheckbox.checked) {
+          editCheckbox.checked = false;
+          checkedEdit.delete(leadId);
+          const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
+          if (editBtn) editBtn.disabled = true;
+        }
+        teleconsultationSelections.set(leadId, 'false');
       }
-    }
-
-    // Get filter values
-    const searchInput = document.getElementById("kunden-search");
-    const searchTerm = (searchInput?.value || "").toLowerCase();
-    statusFilter = document.getElementById("filter-status")?.value || "";
-    leadSourceFilter = document.getElementById("filter-source")?.value || "";
-    ortSearchTerm = (document.getElementById("filter-ort")?.value || "").toLowerCase();
-
-    // Apply filters
-    let data = leadsData.slice();
+      
+      console.log(`Teleconsultation for lead ${leadId} set to ${selectedValue}`);
+      closeModal();
+    });
     
-    // Apply status card filter
-    if (activeDef && activeDef.filter) {
-      data = data.filter(activeDef.filter);
-    }
-    
-    // Apply status dropdown filter
-    if (statusFilter) {
-      data = data.filter(l => l.status === statusFilter);
-    }
-    
-    // Apply lead source dropdown filter
-    if (leadSourceFilter) {
-      data = data.filter(l => l.quelle === leadSourceFilter);
-    }
-    
-    // Apply search term filter (name or ort)
-    if (searchTerm) {
-      data = data.filter(
-        (l) =>
-          l.name.toLowerCase().includes(searchTerm) ||
-          l.ort.toLowerCase().includes(searchTerm),
-      );
-    }
-    
-    // Apply ort search filter
-    if (ortSearchTerm) {
-      data = data.filter(
-        (l) =>
-          l.ort.toLowerCase().includes(ortSearchTerm),
-      );
-    }
+    modal.classList.add('active');
+  }
 
-    filteredData = data;
-
-    const tbody = document.getElementById("kunden-tbody");
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    if (!filteredData.length) {
-      tbody.innerHTML = `<td colspan="14"><div class="empty-state">Keine Kunden in dieser Kategorie.</div>`;
-      updateCount();
+  // Function to open edit status modal (only when edit is enabled)
+  function openEditStatusModal(leadId) {
+    if (!checkedEdit.has(leadId)) {
+      alert("Bitte aktivieren Sie zuerst die Beratung mit WAHR");
       return;
     }
-
-    const showPhoneIcon = shouldShowPhoneIcon();
-    const showEmailIcon = shouldShowEmailIcon();
-
-    filteredData.forEach((lead) => {
-      const isExp = expandedRows.has(lead.id);
-      const editCb = checkedEdit.has(lead.id);
-      const displayName =
-        (lead.salutation ? lead.salutation + " " : "") + lead.name;
-
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <tr>
-          <td>
-          <input type="checkbox" class="cb kunden-cb" data-id="${lead.id}" ${selectedKunden.has(lead.id) ? "checked" : ""}>
-         </td>
-         <td>
-          <button class="expand-btn ${isExp ? "open" : ""}" onclick="window.toggleKundenExpand(${lead.id})">
-            <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
-         </td>
-         <td><span style="font-weight:500">${escapeHtml(displayName)}</span></td>
-        <td style="font-size:0.8rem;color:#64748b">${escapeHtml(lead.ort)}</td>
-         <td><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></td>
-         <td>${lead.quelle ? `<span class="tag">${escapeHtml(lead.quelle)}</span>` : ""}</td>
-         <td>${lead.bearbeiter ? `<span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span>` : ""}</td>
-         <td>
-          <div style="width:32px;height:32px;border-radius:50%;background:#f0f0f0;"></div>
-         </td>
-         <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
-         <td><span class="date-cell">${escapeHtml(lead.datum)}</span></td>
-         <td>
-          <button class="act-btn" onclick="window.viewKunde(${lead.id})" title="Details anzeigen">
-            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-            </svg>
-          </button>
-         </td>
-         <td>
-          <div style="display: flex; gap: 6px; align-items: center;">
-            ${showPhoneIcon ? `
-              <button class="act-btn-green" onclick="window.callKunde(${lead.id})" title="Anrufen">
-                <svg width="14" height="14" fill="white" stroke="white" stroke-width="1.5" viewBox="0 0 24 24">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.08 5.18 2 2 0 0 1 5.06 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.09 10.91A16 16 0 0 0 13.09 15l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16z"/>
-                </svg>
-              </button>
-            ` : ''}
-            ${showEmailIcon ? `
-              <button class="act-btn-email" onclick="window.sendEmailToKunde(${lead.id})" title="E-Mail senden">
-                <svg width="14" height="14" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">
-                  <rect x="2" y="4" width="20" height="16" rx="2"/>
-                  <path d="m22 7-10 7L2 7"/>
-                </svg>
-              </button>
-            ` : ''}
+    
+    const lead = leadsData.find(l => l.id === leadId);
+    if (!lead) return;
+    
+    const modalHtml = `
+      <div id="editStatusModal" class="k-modal-overlay">
+        <div class="k-modal-content" style="max-width: 450px;">
+          <div class="k-modal-header">
+            <h3>Status ändern - ${escapeHtml(lead.name)}</h3>
+            <button class="k-close-btn" id="closeEditStatusModal">&times;</button>
           </div>
-         </td>
-         <td>
-          <div class="bearbeiten-cell">
-            <input type="checkbox" class="edit-cb" data-id="${lead.id}" ${editCb ? "checked" : ""} 
-              onchange="window.toggleEditCheck(${lead.id},this)">
-            <button class="edit-icon-btn" onclick="window.editKundeClick(${lead.id})" ${editCb ? "" : "disabled"} title="Bearbeiten">
-              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-            </button>
-
+          <div class="k-modal-body">
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Status auswählen:</label>
+              <select id="editStatusSelect" class="k-full-select">
+                ${EDIT_STATUS_OPTIONS.map(opt => `<option value="${opt}" ${lead.status === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+              </select>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+              <button type="button" id="cancelEditStatus" class="k-btn-outline" style="padding: 10px 24px;">Abbrechen</button>
+              <button type="button" id="saveEditStatus" class="k-btn-green" style="padding: 10px 24px;">Speichern</button>
+            </div>
           </div>
-         </td>
-         <td>
-          <button class="act-btn-green-outline" onclick="window.openKarte(${lead.id})" title="Karte">
-            <svg width="14" height="14" fill="none" stroke="#22c55e" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-            </svg>
-          </button>
-         </td>
-      `;
-      tbody.appendChild(tr);
-
-      const xtr = document.createElement("tr");
-      xtr.className = `expand-row${isExp ? " open" : ""}`;
-      xtr.innerHTML = `<td colspan="14"><div class="expand-grid">
-        <div class="expand-item"><label>Dachfläche (m²)</label><span>${escapeHtml(lead.dachflaeche || "—")}</span></div>
-        <div class="expand-item"><label>Dacheindeckung</label><span>${escapeHtml(lead.dacheindeckung || "—")}</span></div>
-        <div class="expand-item"><label>Baujahr Dach</label><span>${escapeHtml(lead.dachalter || "—")}</span></div>
-        <div class="expand-item"><label>Dachpfanne</label><span>${escapeHtml(lead.dachpfanne || "—")}</span></div>
-        <div class="expand-item"><label>Wunsch Farbe</label><span>${escapeHtml(lead.farbe || "—")}</span></div>
-        <div class="expand-item"><label>Dachneigung Grad</label><span>${escapeHtml(lead.dachneigung || "—")}</span></div>
-        <div class="expand-item"><label>Straße</label><span>${escapeHtml(lead.strasse || "—")}</span></div>
-        <div class="expand-item"><label>Telefon</label><span>${escapeHtml(lead.telefon || "—")}</span></div>
-        <div class="expand-item"><label>E-Mail</label><span>${escapeHtml(lead.email || "—")}</span></div>
-      </div>`;
-      tbody.appendChild(xtr);
+        </div>
+      </div>
+    `;
+    
+    const existingModal = document.getElementById("editStatusModal");
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById("editStatusModal");
+    const closeBtn = document.getElementById("closeEditStatusModal");
+    const cancelBtn = document.getElementById("cancelEditStatus");
+    const saveBtn = document.getElementById("saveEditStatus");
+    
+    const closeModal = () => {
+      modal.classList.remove('active');
+      setTimeout(() => modal.remove(), 300);
+    };
+    
+    closeBtn?.addEventListener('click', closeModal);
+    cancelBtn?.addEventListener('click', closeModal);
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
     });
-
-    document.querySelectorAll(".kunden-cb").forEach((cb) => {
-      cb.addEventListener("change", (e) => {
-        const id = parseInt(e.target.dataset.id);
-        if (e.target.checked) selectedKunden.add(id);
-        else selectedKunden.delete(id);
-        updateCount();
-        updateMassEmailButton();
-      });
+    
+    saveBtn?.addEventListener('click', () => {
+      const newStatus = document.getElementById("editStatusSelect")?.value;
+      if (newStatus) {
+        lead.status = newStatus;
+        lead.statusClass = getStatusClass(newStatus);
+        console.log(`Lead ${leadId} status updated to ${newStatus}`);
+        renderKunden();
+      }
+      closeModal();
     });
-
-    updateCount();
-    updateMassEmailButton();
+    
+    modal.classList.add('active');
   }
 
-  function updateCount() {
-    const el = document.getElementById("kunden-selected-count");
-    if (el) el.textContent = `Wählen Sie Leads aus: ${selectedKunden.size}`;
-  }
-
-  function escapeHtml(str) {
-    if (!str) return "";
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
-
-  window.setKundenFilter = (key) => {
-    kundenActiveFilter = key;
-    renderKunden();
-  };
-  window.clearKundenFilter = () => {
-    kundenActiveFilter = null;
-    renderKunden();
-  };
-  window.toggleKundenExpand = (id) => {
-    if (expandedRows.has(id)) expandedRows.delete(id);
-    else expandedRows.add(id);
-    renderKunden();
-  };
-
-  window.toggleEditCheck = (id, cbEl) => {
-    if (cbEl.checked) checkedEdit.add(id);
-    else checkedEdit.delete(id);
-    const btn = cbEl.parentElement?.querySelector(".edit-icon-btn");
-    if (btn) btn.disabled = !cbEl.checked;
-  };
-
-  window.editKundeClick = (id) => {
-    if (!checkedEdit.has(id)) return;
-    window.openStatusModal(id);
-  };
-
-  let statusModalLeadId = null;
-  window.openStatusModal = (id) => {
-    statusModalLeadId = id;
-    const lead = leadsData.find((l) => l.id === id);
-    const sel = document.getElementById("statusModalSelect");
-    if (sel && lead) sel.value = lead.status || "";
-    const modal = document.getElementById("statusModal");
-    if (modal) modal.classList.add("active");
-  };
-
+  // Optimized view function - loads data faster
   window.viewKunde = async (id) => {
     const lead = leadsData.find((l) => l.id === id);
     if (!lead) return;
@@ -832,8 +773,11 @@ const kundenPage = (function () {
     const contentEl = document.getElementById("kundenViewContent");
     if (titleEl) titleEl.textContent = (lead.salutation ? lead.salutation + " " : "") + lead.name + " – Details";
     if (contentEl) {
-      contentEl.innerHTML = `<div style="text-align: center; padding: 40px;">⏳ Lade Notizen und Aktivitäten...</div>`;
+      contentEl.innerHTML = `<div style="text-align: center; padding: 20px;">⏳ Lade Details...</div>`;
     }
+    
+    const modal = document.getElementById("kundenViewModal");
+    if (modal) modal.classList.add("active");
     
     const [notes, activities] = await Promise.all([
       fetchNotesForLead(lead.id),
@@ -920,8 +864,6 @@ const kundenPage = (function () {
         </div>
       `;
     }
-    const modal = document.getElementById("kundenViewModal");
-    if (modal) modal.classList.add("active");
   };
 
   window.callKunde = async (id) => {
@@ -988,6 +930,347 @@ const kundenPage = (function () {
   };
 
   window.openMassEmailModal = openMassEmailModal;
+
+  function renderKunden() {
+    if (!leadsData.length) {
+      renderStats();
+      return;
+    }
+
+    renderStats();
+
+    const statDefs = getStatDefinitions();
+    const activeDef = statDefs.find((d) => d.key === kundenActiveFilter);
+
+    const pillEl = document.getElementById("kunden-filter-pill");
+    if (pillEl) {
+      if (activeDef) {
+        pillEl.style.display = "block";
+        pillEl.innerHTML = `<span class="active-filter-pill">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          Gefiltert: ${activeDef.label}
+          <button onclick="window.clearKundenFilter()" title="Filter entfernen">✕</button>
+        </span>`;
+      } else {
+        pillEl.style.display = "none";
+      }
+    }
+
+    const searchInput = document.getElementById("kunden-search");
+    const searchTerm = (searchInput?.value || "").toLowerCase();
+    statusFilter = document.getElementById("filter-status")?.value || "";
+    leadSourceFilter = document.getElementById("filter-source")?.value || "";
+    ortSearchTerm = (document.getElementById("filter-ort")?.value || "").toLowerCase();
+
+    let data = leadsData.slice();
+    
+    if (activeDef && activeDef.filter) {
+      data = data.filter(activeDef.filter);
+    }
+    
+    if (statusFilter) {
+      data = data.filter(l => l.status === statusFilter);
+    }
+    
+    if (leadSourceFilter) {
+      data = data.filter(l => l.quelle === leadSourceFilter);
+    }
+    
+    if (searchTerm) {
+      data = data.filter(
+        (l) =>
+          l.name.toLowerCase().includes(searchTerm) ||
+          l.ort.toLowerCase().includes(searchTerm),
+      );
+    }
+    
+    if (ortSearchTerm) {
+      data = data.filter(
+        (l) =>
+          l.ort.toLowerCase().includes(ortSearchTerm),
+      );
+    }
+
+    filteredData = data;
+
+    const tbody = document.getElementById("kunden-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!filteredData.length) {
+      tbody.innerHTML = `<td colspan="14"><div class="empty-state">Keine Kunden in dieser Kategorie.</div>`;
+      updateCount();
+      return;
+    }
+
+    const showPhoneIcon = shouldShowPhoneIcon();
+    const showEmailIcon = shouldShowEmailIcon();
+
+    filteredData.forEach((lead) => {
+      const isExp = expandedRows.has(lead.id);
+      const editCb = checkedEdit.has(lead.id);
+      const displayName =
+        (lead.salutation ? lead.salutation + " " : "") + lead.name;
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <tr>
+          <td>
+          <input type="checkbox" class="cb kunden-cb" data-id="${lead.id}" ${selectedKunden.has(lead.id) ? "checked" : ""}>
+          </td>
+          <td>
+          <button class="expand-btn ${isExp ? "open" : ""}" onclick="window.toggleKundenExpand(${lead.id})">
+            <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          </td>
+          <td><span style="font-weight:500">${escapeHtml(displayName)}</span></td>
+        <td style="font-size:0.8rem;color:#64748b">${escapeHtml(lead.ort)}</td>
+          <td><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></td>
+          <td>${lead.quelle ? `<span class="tag">${escapeHtml(lead.quelle)}</span>` : ""}</td>
+          <td>${lead.bearbeiter ? `<span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span>` : ""}</td>
+          <td>
+          <div style="width:32px;height:32px;border-radius:50%;background:#f0f0f0;"></div>
+          </td>
+          <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
+          <td><span class="date-cell">${escapeHtml(lead.datum)}</span></td>
+          <td>
+          <button class="act-btn" onclick="window.viewKunde(${lead.id})" title="Details anzeigen">
+            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+          </td>
+          <td>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            ${showPhoneIcon ? `
+              <button class="act-btn-green" onclick="window.callKunde(${lead.id})" title="Anrufen">
+                <svg width="14" height="14" fill="white" stroke="white" stroke-width="1.5" viewBox="0 0 24 24">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.08 5.18 2 2 0 0 1 5.06 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.09 10.91A16 16 0 0 0 13.09 15l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16z"/>
+                </svg>
+              </button>
+            ` : ''}
+            ${showEmailIcon ? `
+              <button class="act-btn-email" onclick="window.sendEmailToKunde(${lead.id})" title="E-Mail senden">
+                <svg width="14" height="14" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">
+                  <rect x="2" y="4" width="20" height="16" rx="2"/>
+                  <path d="m22 7-10 7L2 7"/>
+                </svg>
+              </button>
+            ` : ''}
+          </div>
+          </td>
+          <td>
+          <div class="bearbeiten-cell">
+            <input type="checkbox" class="edit-cb" data-id="${lead.id}" ${editCb ? "checked" : ""} 
+              onchange="window.handleEditCheckboxClick(${lead.id}, this)">
+            <button class="edit-icon-btn" onclick="window.openEditStatusModal(${lead.id})" ${editCb ? "" : "disabled"} title="Bearbeiten">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+          </div>
+          </td>
+          <td>
+          <button class="act-btn-green-outline" onclick="window.openKarte(${lead.id})" title="Karte">
+            <svg width="14" height="14" fill="none" stroke="#22c55e" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+            </svg>
+          </button>
+          </td>
+      `;
+      tbody.appendChild(tr);
+
+      const xtr = document.createElement("tr");
+      xtr.className = `expand-row${isExp ? " open" : ""}`;
+      xtr.innerHTML = `<td colspan="14"><div class="expand-grid">
+        <div class="expand-item"><label>Dachfläche (m²)</label><span>${escapeHtml(lead.dachflaeche || "—")}</span></div>
+        <div class="expand-item"><label>Dacheindeckung</label><span>${escapeHtml(lead.dacheindeckung || "—")}</span></div>
+        <div class="expand-item"><label>Baujahr Dach</label><span>${escapeHtml(lead.dachalter || "—")}</span></div>
+        <div class="expand-item"><label>Dachpfanne</label><span>${escapeHtml(lead.dachpfanne || "—")}</span></div>
+        <div class="expand-item"><label>Wunsch Farbe</label><span>${escapeHtml(lead.farbe || "—")}</span></div>
+        <div class="expand-item"><label>Dachneigung Grad</label><span>${escapeHtml(lead.dachneigung || "—")}</span></div>
+        <div class="expand-item"><label>Straße</label><span>${escapeHtml(lead.strasse || "—")}</span></div>
+        <div class="expand-item"><label>Telefon</label><span>${escapeHtml(lead.telefon || "—")}</span></div>
+        <div class="expand-item"><label>E-Mail</label><span>${escapeHtml(lead.email || "—")}</span></div>
+      </div>`;
+      tbody.appendChild(xtr);
+    });
+
+    document.querySelectorAll(".kunden-cb").forEach((cb) => {
+      cb.addEventListener("change", (e) => {
+        const id = parseInt(e.target.dataset.id);
+        if (e.target.checked) selectedKunden.add(id);
+        else selectedKunden.delete(id);
+        updateCount();
+        updateMassEmailButton();
+      });
+    });
+
+    updateCount();
+    updateMassEmailButton();
+  }
+
+  function updateCount() {
+    const el = document.getElementById("kunden-selected-count");
+    if (el) el.textContent = `Wählen Sie Leads aus: ${selectedKunden.size}`;
+  }
+
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  window.setKundenFilter = (key) => {
+    kundenActiveFilter = key;
+    renderKunden();
+  };
+  window.clearKundenFilter = () => {
+    kundenActiveFilter = null;
+    renderKunden();
+  };
+  window.toggleKundenExpand = (id) => {
+    if (expandedRows.has(id)) expandedRows.delete(id);
+    else expandedRows.add(id);
+    renderKunden();
+  };
+
+  // Handle edit checkbox click - opens teleconsultation modal
+  window.handleEditCheckboxClick = (id, checkboxElement) => {
+    // Prevent default behavior - we'll handle it manually
+    const isCurrentlyChecked = checkboxElement.checked;
+    
+    // Open modal to let user choose WAHR/FALSCH
+    openTeleconsultationModalWithCallback(id, checkboxElement, isCurrentlyChecked);
+  };
+
+  // Modified teleconsultation modal with callback
+  function openTeleconsultationModalWithCallback(leadId, checkboxElement, originalState) {
+    const lead = leadsData.find(l => l.id === leadId);
+    if (!lead) return;
+    
+    const currentSelection = teleconsultationSelections.get(leadId) || '';
+    
+    const modalHtml = `
+      <div id="teleconsultationModal" class="k-modal-overlay">
+        <div class="k-modal-content" style="max-width: 500px;">
+          <div class="k-modal-header">
+            <h3>Erstberatung Telefon</h3>
+            <button class="k-close-btn" id="closeTeleModal">&times;</button>
+          </div>
+          <div class="k-modal-body">
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Wählen Sie eine Option:</label>
+              <select id="teleconsultationSelect" class="k-full-select">
+                <option value="">Bitte wählen</option>
+                <option value="true" ${currentSelection === 'true' ? 'selected' : ''}>WAHR</option>
+                <option value="false" ${currentSelection === 'false' ? 'selected' : ''}>FALSCH</option>
+              </select>
+            </div>
+            
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+              <button type="button" id="cancelTeleModal" class="k-btn-outline" style="padding: 10px 24px;">Abbrechen</button>
+              <button type="button" id="updateTeleconsultation" class="k-btn-green" style="padding: 10px 24px;">Aktualisierung Erstberatung Telefon</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    const existingModal = document.getElementById("teleconsultationModal");
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById("teleconsultationModal");
+    const closeBtn = document.getElementById("closeTeleModal");
+    const cancelBtn = document.getElementById("cancelTeleModal");
+    const updateBtn = document.getElementById("updateTeleconsultation");
+    
+    const closeModal = () => {
+      modal.classList.remove('active');
+      setTimeout(() => modal.remove(), 300);
+      // Reset checkbox to original state if modal was closed without saving
+      if (checkboxElement) {
+        checkboxElement.checked = originalState;
+      }
+    };
+    
+    closeBtn?.addEventListener('click', closeModal);
+    cancelBtn?.addEventListener('click', closeModal);
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+    
+    updateBtn?.addEventListener('click', () => {
+      const selectedValue = document.getElementById("teleconsultationSelect")?.value;
+      
+      if (selectedValue === 'true') {
+        // Check the checkbox
+        if (checkboxElement && !checkboxElement.checked) {
+          checkboxElement.checked = true;
+          selectedKunden.add(leadId);
+          updateCount();
+          updateMassEmailButton();
+        }
+        
+        // Enable edit for this lead
+        const editCheckbox = document.querySelector(`.edit-cb[data-id="${leadId}"]`);
+        if (editCheckbox && !editCheckbox.checked) {
+          editCheckbox.checked = true;
+          checkedEdit.add(leadId);
+          const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
+          if (editBtn) editBtn.disabled = false;
+        }
+        teleconsultationSelections.set(leadId, 'true');
+      } else if (selectedValue === 'false') {
+        // Uncheck the checkbox
+        if (checkboxElement && checkboxElement.checked) {
+          checkboxElement.checked = false;
+          selectedKunden.delete(leadId);
+          updateCount();
+          updateMassEmailButton();
+        }
+        
+        // Disable edit for this lead
+        const editCheckbox = document.querySelector(`.edit-cb[data-id="${leadId}"]`);
+        if (editCheckbox && editCheckbox.checked) {
+          editCheckbox.checked = false;
+          checkedEdit.delete(leadId);
+          const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
+          if (editBtn) editBtn.disabled = true;
+        }
+        teleconsultationSelections.set(leadId, 'false');
+      } else {
+        // No selection, revert checkbox
+        if (checkboxElement) {
+          checkboxElement.checked = originalState;
+        }
+      }
+      
+      console.log(`Teleconsultation for lead ${leadId} set to ${selectedValue}`);
+      closeModal();
+    });
+    
+    modal.classList.add('active');
+  }
+
+  window.openEditStatusModal = openEditStatusModal;
+
+  let statusModalLeadId = null;
+  window.openStatusModal = (id) => {
+    statusModalLeadId = id;
+    const lead = leadsData.find((l) => l.id === id);
+    const sel = document.getElementById("statusModalSelect");
+    if (sel && lead) sel.value = lead.status || "";
+    const modal = document.getElementById("statusModal");
+    if (modal) modal.classList.add("active");
+  };
 
   function saveStatusUpdate() {
     const newStatus = document.getElementById("statusModalSelect")?.value;
@@ -1059,7 +1342,7 @@ const kundenPage = (function () {
       .mass-email-btn:hover { background: #16a34a; }
       .mass-email-btn svg { stroke: white; }
       .table-wrap { overflow-x: auto; background: white; border-radius: 16px; border: 1px solid #eef2f8; }
-      #kunden-table { width: 100%; border-collapse: collapse; min-width: 1300px; }
+      #kunden-table { width: 100%; border-collapse: collapse; min-width: 1400px; }
       #kunden-table th { text-align: left; padding: 13px 10px; background: #f8fafc; color: #475569; font-weight: 600; font-size: 0.78rem; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
       #kunden-table td { padding: 11px 10px; border-bottom: 1px solid #f1f5f9; font-size: 0.83rem; vertical-align: middle; }
       #kunden-table tr:hover { background: #f8fafc; }
@@ -1083,7 +1366,9 @@ const kundenPage = (function () {
       .act-btn-email { background: #3b82f6; border: none; cursor: pointer; padding: 7px 9px; border-radius: 9px; color: white; display: inline-flex; align-items: center; justify-content: center; }
       .act-btn-email:hover { background: #2563eb; }
       .act-btn-outline { background: none; border: 1.5px solid #e2e8f0; cursor: pointer; padding: 5px 7px; border-radius: 7px; color: #94a3b8; display: inline-flex; align-items: center; justify-content: center; }
+      .act-btn-outline:hover { background: #f1f5f9; color: #22c55e; border-color: #22c55e; }
       .act-btn-green-outline { background: none; border: 1.5px solid #22c55e; cursor: pointer; padding: 5px 7px; border-radius: 7px; color: #22c55e; display: inline-flex; align-items: center; justify-content: center; }
+      .act-btn-green-outline:hover { background: #22c55e10; }
       .bearbeiten-cell { display: flex; align-items: center; gap: 6px; }
       .edit-cb { width: 15px; height: 15px; cursor: pointer; accent-color: #22c55e; }
       .edit-icon-btn { background: none; border: none; cursor: pointer; padding: 4px; border-radius: 6px; color: #64748b; display: inline-flex; align-items: center; transition: all 0.18s; }
@@ -1140,7 +1425,6 @@ const kundenPage = (function () {
         
         <!-- Filter Section -->
         <div class="filter-section">
-        
           <div class="filter-group">
             <label>Lead Quelle</label>
             <select id="filter-source" onchange="window.applyFilters()">
@@ -1194,7 +1478,7 @@ const kundenPage = (function () {
               </tr>
             </thead>
             <tbody id="kunden-tbody"></tbody>
-           </table>
+          </table>
         </div>
       </div>
 
@@ -1218,13 +1502,10 @@ const kundenPage = (function () {
             <div class="form-group">
               <select id="statusModalSelect" class="k-full-select">
                 <option value="">Status auswählen</option>
-                <option value="Offen">Offen</option>
-                <option value="follow up">Follow up</option>
-                <option value="Infos...">Infos...</option>
-                <option value="in Bearbeitung">In Bearbeitung</option>
-                <option value="Beauftragung">Beauftragung</option>
-                <option value="EA Beauftragung">EA Beauftragung</option>
-                <option value="NF Beauftragung">NF Beauftragung</option>
+                <option value="TNE Offen">TNE Offen</option>
+                <option value="in Bearbeitung">in Bearbeitung</option>
+                <option value="Nur Info eingeholt">Nur Info eingeholt</option>
+                <option value="falscher Kunde">falscher Kunde</option>
               </select>
             </div>
             <div style="text-align:right; margin-top:20px;">
@@ -1304,7 +1585,7 @@ const kundenPage = (function () {
       .getElementById("statusModalSaveBtn")
       ?.addEventListener("click", saveStatusUpdate);
 
-    console.log("✅ Kunden page loaded with filters and 3CX phone integration");
+    console.log("✅ Kunden page loaded with filters, teleconsultation, and 3CX phone integration");
   }
 
   return { init };
@@ -1312,4 +1593,4 @@ const kundenPage = (function () {
 
 window.kundenPage = kundenPage;
 window.customersPage = window.kundenPage;
-console.log("kunden.js loaded - window.kundenPage exists with filters and 3CX phone integration");
+console.log("kunden.js loaded - window.kundenPage exists with filters, teleconsultation and 3CX phone integration");

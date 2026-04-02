@@ -2469,15 +2469,11 @@ if (currentEditId) {
       ?.addEventListener("click", () =>
         document.getElementById("massEmailModal").classList.remove("active"),
       );
-    document
-      .getElementById("massEmailModal")
-      ?.addEventListener("click", (e) => {
-        if (e.target === document.getElementById("massEmailModal"))
-          document.getElementById("massEmailModal").classList.remove("active");
-      });
-    document
-      .getElementById("sendMassEmailBtn")
-      ?.addEventListener("click", sendMassEmails);
+    document.getElementById("massEmailModal")?.addEventListener("click", (e) => {
+      if (e.target === document.getElementById("massEmailModal"))
+        document.getElementById("massEmailModal").classList.remove("active");
+    });
+    document.getElementById("sendMassEmailBtn")?.addEventListener("click", sendMassEmails);
   }
 
   return { init };
