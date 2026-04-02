@@ -34,6 +34,14 @@ const anruferinPage = (function () {
 
   let calls = [];
 
+  function isStaticLocalHost() {
+    return (
+      typeof location !== 'undefined' &&
+      (location.protocol === 'file:' ||
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || ''))
+    );
+  }
+
   // ── NORMALISE: works with any key style the server returns ───────────────
   function normalise(raw) {
     return {
@@ -71,13 +79,23 @@ const anruferinPage = (function () {
 
     let data = null;
     let errMsg = '';
+    const cacheBust = `_ts=${Date.now()}`;
+    const sameOriginUrl = `${SAME_ORIGIN_API}?${cacheBust}`;
+    const directUrl = `${DIRECT_URL}?${cacheBust}`;
+    const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(directUrl);
+    const altProxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(directUrl);
 
-    const attempts = [
-      { label: 'same-origin', fn: async () => fetch(SAME_ORIGIN_API, { headers: { Accept: 'application/json' } }) },
-      { label: 'direkt',      fn: async () => fetch(DIRECT_URL,        { headers: { Accept: 'application/json' }, mode: 'cors' }) },
-      { label: 'CORS-Proxy',  fn: async () => fetch(PROXY_URL,         { headers: { Accept: 'application/json' } }) },
-      { label: 'alternativ',  fn: async () => fetch(ALT_PROXY_URL,     { headers: { Accept: 'application/json' } }) },
-    ];
+    const attempts = [];
+    if (!isStaticLocalHost()) {
+      attempts.push(
+        { label: 'same-origin', fn: async () => fetch(sameOriginUrl, { headers: { Accept: 'application/json' }, cache: 'no-store' }) },
+        { label: 'direkt', fn: async () => fetch(directUrl, { headers: { Accept: 'application/json' }, mode: 'cors', cache: 'no-store' }) },
+      );
+    }
+    attempts.push(
+      { label: 'CORS-Proxy', fn: async () => fetch(proxyUrl, { headers: { Accept: 'application/json' }, cache: 'no-store' }) },
+      { label: 'alternativ', fn: async () => fetch(altProxyUrl, { headers: { Accept: 'application/json' }, cache: 'no-store' }) },
+    );
 
     for (const a of attempts) {
       try {

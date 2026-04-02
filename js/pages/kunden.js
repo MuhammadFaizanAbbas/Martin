@@ -90,10 +90,21 @@ const kundenPage = (function () {
     }
   }
 
+  function isStaticLocalHost() {
+    return (
+      typeof location !== "undefined" &&
+      (location.protocol === "file:" ||
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || ""))
+    );
+  }
+
   async function fetchNotesForLead(leadId) {
+    const cacheBust = `_ts=${Date.now()}`;
     try {
-      const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`, { 
-        headers: { Accept: 'application/json' } 
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+      const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`, { 
+        headers: { Accept: 'application/json' },
+        cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -111,14 +122,17 @@ const kundenPage = (function () {
       console.warn('Same-origin notes fetch failed, trying proxies:', err.message);
     }
     
-    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}`;
+    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`;
     const proxies = [
       `https://corsproxy.io/?${encodeURIComponent(target)}`,
       `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
     ];
     for (const url of proxies) {
       try {
-        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        const r = await fetch(url, {
+          headers: { Accept: 'application/json' },
+          cache: "no-store",
+        });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
         const list = Array.isArray(data) ? data : (data.data || data.notes || []);
@@ -139,6 +153,7 @@ const kundenPage = (function () {
   }
 
   async function fetchActivityForLead(leadId) {
+    const cacheBust = `_ts=${Date.now()}`;
     const normalize = (a) => {
       const text = a.text || a.activity || a.action || a.event || a.message || a.desc || a.description || '';
       const by = a.from || a.by || a.user || a.username || a.author || a.created_by || 'System';
@@ -152,7 +167,10 @@ const kundenPage = (function () {
     };
 
     async function tryFetch(url) {
-      const r = await fetch(url, { headers: { Accept: 'application/json' } });
+      const r = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        cache: "no-store",
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       console.log('🔎 Activity raw data:', data);
@@ -161,9 +179,10 @@ const kundenPage = (function () {
     }
 
     try {
-      let list = await tryFetch(`${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`);
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+      let list = await tryFetch(`${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`);
       if (!list.length) {
-        list = await tryFetch(`${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`);
+        list = await tryFetch(`${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}&${cacheBust}`);
       }
       if (list.length) {
         activityCache.set(String(leadId), list);
@@ -175,8 +194,8 @@ const kundenPage = (function () {
 
     const base = 'https://goarrow.ai/test/fetch_activity.php';
     const targets = [
-      `${base}?lead_id=${encodeURIComponent(leadId)}`,
-      `${base}?id=${encodeURIComponent(leadId)}`,
+      `${base}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`,
+      `${base}?id=${encodeURIComponent(leadId)}&${cacheBust}`,
     ];
     const proxies = (t) => [
       `https://corsproxy.io/?${encodeURIComponent(t)}`,

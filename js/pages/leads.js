@@ -8,6 +8,7 @@ const leadsPage = (function () {
   let selectedLeads = new Set();
   let currentEditId = null;
   let currentNotesId = null;
+  let currentViewLeadId = null;
   // Cache for fetched notes per lead id
   // Map<leadId, Array<{text, author, date}>>
   let notesCache = new Map();
@@ -763,6 +764,7 @@ const leadsPage = (function () {
   // ─────────────────────────────────────────────
   const INSERT_ACTIVITY_API = "/api/insert_activity";
   const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
+  const INSERT_NOTE_DIRECT = "https://goarrow.ai/test/insert_lead_note.php";
 
   async function insertActivity(leadId, activityType, activityText) {
     const payload = {
@@ -771,9 +773,14 @@ const leadsPage = (function () {
       activity_text: activityText,
       timestamp: new Date().toISOString(),
     };
+    const params = new URLSearchParams();
+    Object.entries(payload).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
 
     try {
       // Try same-origin API first
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
       const res = await fetch(INSERT_ACTIVITY_API, {
         method: "POST",
         headers: {
@@ -795,10 +802,7 @@ const leadsPage = (function () {
 
       // Try direct endpoint as fallback
       try {
-        const params = new URLSearchParams();
-        Object.entries(payload).forEach(([k, v]) => {
-          if (v !== undefined && v !== null) params.append(k, String(v));
-        });
+        if (isStaticLocalHost()) throw new Error("Static localhost direct CORS");
         const res = await fetch(INSERT_ACTIVITY_DIRECT, {
           method: "POST",
           headers: {
@@ -816,6 +820,26 @@ const leadsPage = (function () {
           return { status: "success", raw: text };
         }
       } catch (directErr) {
+        try {
+          const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_ACTIVITY_DIRECT)}`;
+          const res = await fetch(proxyUrl, {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: params,
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const text = await res.text();
+          try {
+            return JSON.parse(text);
+          } catch {
+            return { status: "success", raw: text };
+          }
+        } catch (proxyErr) {
+          directErr = proxyErr;
+        }
         console.error("Activity insert failed:", directErr);
         throw new Error(
           `Aktivität konnte nicht gespeichert werden: ${directErr.message}`,
@@ -1381,11 +1405,13 @@ async function updateLeadOnAPI(id, payload) {
   // NOTES API HELPERS
   // ─────────────────────────────────────────────
   async function fetchNotesForLead(leadId) {
+    const cacheBust = `_ts=${Date.now()}`;
     // 1) Same-origin on Vercel
     try {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
       const res = await fetch(
-        `${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`,
-        { headers: { Accept: "application/json" } },
+        `${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`,
+        { headers: { Accept: "application/json" }, cache: "no-store" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -1408,14 +1434,17 @@ async function updateLeadOnAPI(id, payload) {
       );
     }
     // 2) Proxy fallback for local testing
-    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}`;
+    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`;
     const proxies = [
       `https://corsproxy.io/?${encodeURIComponent(target)}`,
       `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
     ];
     for (const url of proxies) {
       try {
-        const r = await fetch(url, { headers: { Accept: "application/json" } });
+        const r = await fetch(url, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
         const list = Array.isArray(data) ? data : data.data || data.notes || [];
@@ -1439,7 +1468,12 @@ async function updateLeadOnAPI(id, payload) {
 
   async function createNoteForLead(leadId, text) {
     const body = { lead_id: leadId, note: text, text };
+    const params = new URLSearchParams();
+    Object.entries(body).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
     try {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
       const res = await fetch(NOTES_INSERT_SAME, {
         method: "POST",
         headers: {
@@ -1452,7 +1486,26 @@ async function updateLeadOnAPI(id, payload) {
       const data = await res.json();
       return data;
     } catch (err) {
-      throw new Error(`Notiz konnte nicht gespeichert werden: ${err.message}`);
+      try {
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_NOTE_DIRECT)}`;
+        const res = await fetch(proxyUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const textResp = await res.text();
+        try {
+          return JSON.parse(textResp);
+        } catch {
+          return { status: "success", raw: textResp };
+        }
+      } catch (proxyErr) {
+        throw new Error(`Notiz konnte nicht gespeichert werden: ${proxyErr.message}`);
+      }
     }
   }
 
@@ -1460,6 +1513,7 @@ async function updateLeadOnAPI(id, payload) {
   // ACTIVITY API HELPERS
   // ─────────────────────────────────────────────
   async function fetchActivityForLead(leadId) {
+    const cacheBust = `_ts=${Date.now()}`;
     // Normalizer tolerant to different API field names
     const normalize = (a) => {
       const text =
@@ -1500,7 +1554,10 @@ async function updateLeadOnAPI(id, payload) {
     };
 
     async function tryFetch(url) {
-      const r = await fetch(url, { headers: { Accept: "application/json" } });
+      const r = await fetch(url, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       console.log("🔎 Activity raw data:", data);
@@ -1512,12 +1569,13 @@ async function updateLeadOnAPI(id, payload) {
 
     // 1) Same-origin first with lead_id, then id
     try {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
       let list = await tryFetch(
-        `${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`,
+        `${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`,
       );
       if (!list.length) {
         list = await tryFetch(
-          `${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`,
+          `${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}&${cacheBust}`,
         );
       }
       if (list.length) return list;
@@ -1528,8 +1586,8 @@ async function updateLeadOnAPI(id, payload) {
     // 2) Proxy fallback for local (lead_id then id)
     const base = "https://goarrow.ai/test/fetch_activity.php";
     const targets = [
-      `${base}?lead_id=${encodeURIComponent(leadId)}`,
-      `${base}?id=${encodeURIComponent(leadId)}`,
+      `${base}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`,
+      `${base}?id=${encodeURIComponent(leadId)}&${cacheBust}`,
     ];
     const proxies = (t) => [
       `https://corsproxy.io/?${encodeURIComponent(t)}`,
@@ -2074,6 +2132,7 @@ async function updateLeadOnAPI(id, payload) {
   window.viewLead = (id) => {
     const lead = fullLeadsData.find((l) => l.id == id);
     if (!lead) return;
+    currentViewLeadId = id;
     document.getElementById("viewTitle").textContent =
       `${lead.salutation ? lead.salutation + " " : ""}${lead.name}`;
     document.getElementById("viewTabContact").innerHTML = `
@@ -2103,14 +2162,29 @@ async function updateLeadOnAPI(id, payload) {
       <div class="view-detail-row"><div class="view-detail-label">Wunsch Farbe</div><div class="view-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Dachneigung Grad</div><div class="view-detail-value">${escapeHtml(lead.dachneigung || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Zusätzliche Extras</div><div class="view-detail-value">${escapeHtml(lead.zusatzExtras || "—")}</div></div>`;
-    document.getElementById("viewTabNotes").innerHTML = lead.notes?.length
-      ? lead.notes
-          .map(
-            (n) =>
-              `<div class="note-card"><div class="note-text">${escapeHtml(n.text)}</div><div class="note-meta"><span>${escapeHtml(n.author)}</span><span>${escapeHtml(n.date)}</span></div></div>`,
-          )
-          .join("")
-      : '<div class="empty-state">Keine Notizen vorhanden.</div>';
+    const notesEl = document.getElementById("viewTabNotes");
+    if (notesEl) {
+      notesEl.innerHTML =
+        '<div class="empty-state loading-state">⏳ Lade Notizen…</div>';
+      fetchNotesForLead(id)
+        .then(() => {
+          if (String(currentViewLeadId) !== String(id)) return;
+          const currentLead = fullLeadsData.find((l) => l.id == id);
+          notesEl.innerHTML = currentLead?.notes?.length
+            ? currentLead.notes
+                .map(
+                  (n) =>
+                    `<div class="note-card"><div class="note-text">${escapeHtml(n.text)}</div><div class="note-meta"><span>${escapeHtml(n.author)}</span><span>${escapeHtml(n.date)}</span></div></div>`,
+                )
+                .join("")
+            : '<div class="empty-state">Keine Notizen vorhanden.</div>';
+        })
+        .catch(() => {
+          if (String(currentViewLeadId) !== String(id)) return;
+          notesEl.innerHTML =
+            '<div class="empty-state">Notizen konnten nicht geladen werden.</div>';
+        });
+    }
 
     // Activity timeline (lazy fetch)
     const activityEl = document.getElementById("viewTabActivity");
@@ -2119,6 +2193,7 @@ async function updateLeadOnAPI(id, payload) {
         '<div class="empty-state loading-state">⏳ Lade Aktivitäten…</div>';
       fetchActivityForLead(id)
         .then((list) => {
+          if (String(currentViewLeadId) !== String(id)) return;
           if (!list.length) {
             activityEl.innerHTML =
               '<div class="empty-state">Keine Aktivitäten vorhanden.</div>';
@@ -2140,6 +2215,7 @@ async function updateLeadOnAPI(id, payload) {
           activityEl.innerHTML = `<div class="activity-wrap">${cards}</div>`;
         })
         .catch(() => {
+          if (String(currentViewLeadId) !== String(id)) return;
           activityEl.innerHTML =
             '<div class="empty-state">Aktivitäten konnten nicht geladen werden.</div>';
         });
@@ -2202,6 +2278,16 @@ async function updateLeadOnAPI(id, payload) {
       .then(async () => {
         showToast("Notiz gespeichert. Synchronisiere…", "success", 2200);
         document.getElementById("noteInput").value = "";
+        const optimisticNote = {
+          text: txt,
+          author: "You",
+          date: new Date().toLocaleString(),
+        };
+        const existingNotes = Array.isArray(lead.notes) ? lead.notes : [];
+        const mergedNotes = [optimisticNote, ...existingNotes];
+        lead.notes = mergedNotes;
+        notesCache.set(String(currentNotesId), mergedNotes);
+        renderNotesList();
         await fetchNotesForLead(currentNotesId);
         renderNotesList();
         await refreshLeads();
@@ -2566,11 +2652,13 @@ if (currentEditId) {
     document
       .getElementById("closeViewModal")
       ?.addEventListener("click", () =>
-        document.getElementById("viewModal").classList.remove("active"),
+        (currentViewLeadId = null,
+        document.getElementById("viewModal").classList.remove("active")),
       );
     document.getElementById("viewModal")?.addEventListener("click", (e) => {
       if (e.target === document.getElementById("viewModal"))
-        document.getElementById("viewModal").classList.remove("active");
+        (currentViewLeadId = null,
+        document.getElementById("viewModal").classList.remove("active"));
     });
 
     // Notes modal
