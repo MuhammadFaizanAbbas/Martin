@@ -2863,7 +2863,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
       #kunden-table th:nth-child(5), #kunden-table td:nth-child(5) { width: 100px; }
       #kunden-table th:nth-child(6), #kunden-table td:nth-child(6) { width: 85px; }
       #kunden-table th:nth-child(7), #kunden-table td:nth-child(7) { width: 85px; }
-      #kunden-table th:nth-child(8), #kunden-table td:nth-child(8) { width: 60px; text-align: center; }
+      #kunden-table th:nth-child(8), #kunden-table td:nth-child(8) { width: 70px; text-align: center; }
       #kunden-table th:nth-child(9), #kunden-table td:nth-child(9) { width: 85px; text-align: right; }
       #kunden-table th:nth-child(10), #kunden-table td:nth-child(10) { width: 82px; }
       #kunden-table th:nth-child(11), #kunden-table td:nth-child(11) { width: 60px; text-align: center; }
@@ -2872,7 +2872,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
       #kunden-table th:nth-child(14), #kunden-table td:nth-child(14) { width: 60px; text-align: center; }
       
       .cb { width: 16px; height: 16px; cursor: pointer; accent-color: #22c55e; margin: 0; }
-      .expand-btn { background: none; border: none; cursor: pointer; padding: 3px 6px; color: #94a3b8; display: inline-flex; align-items: center; justify-content: center; }
+      .expand-btn { background: none; border: none; cursor: pointer; padding: 3px 9px; color: #94a3b8; display: inline-flex; align-items: center; justify-content: center; }
       .expand-btn.open svg { transform: rotate(90deg); }
       .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 500; white-space: nowrap; }
       .badge-follow { background: #dbeafe; color: #1e40af; }

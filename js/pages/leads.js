@@ -450,7 +450,7 @@
       #leads-table th:nth-child(6), #leads-table td:nth-child(6) { width: 78px; }
       #leads-table th:nth-child(7), #leads-table td:nth-child(7) { width: 78px; }
       #leads-table th:nth-child(8), #leads-table td:nth-child(8) { width: 80px; }
-      #leads-table th:nth-child(9), #leads-table td:nth-child(9) { width: 52px; text-align: center; }
+      #leads-table th:nth-child(9), #leads-table td:nth-child(9) { width: 70px; text-align: center; }
       #leads-table th:nth-child(10), #leads-table td:nth-child(10) { width: 78px; }
       #leads-table th:nth-child(11), #leads-table td:nth-child(11) { width: 82px; }
       #leads-table th:nth-child(12), #leads-table td:nth-child(12) { width: 152px; }
