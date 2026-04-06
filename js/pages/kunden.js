@@ -179,6 +179,29 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
     "Storno",
     "Ghoster"
   ];
+  // Status options for edit modal - comprehensive list
+  const client_STATUS_OPTIONS = [
+    "in Bearbeitung",
+    "Offen",
+    "Nur Info eingeholt",
+    "falscher Kunde",
+  ];
+  const BEARBEITUNG_STATUS_OPTIONS = [
+    "follow up",
+    "EA Beauftragung",
+    "Beauftragung",
+    "NF Beauftragung",
+  ];
+  const FOLLOW_UP_STATUS_OPTIONS = [
+    "Ghoster",
+    "Abgesagt",
+    "Abgesagt tot",
+    "NF Beauftragung",
+    "Contact Sign In",
+  ];
+  const BEAUFTRAGUNG_STATUS_OPTIONS = [
+    "Storniert",
+  ];
 
   // Quelle options
   const QUELLE_OPTIONS = [
@@ -1023,86 +1046,214 @@ async function fetchActivityForLead(leadId) {
     return {};
   }
 
-  async function loadAllData() {
-    if (isLoading) return;
-    isLoading = true;
+ async function loadAllData() {
+  if (isLoading) return;
+  isLoading = true;
 
-    const tbody = document.getElementById("kunden-tbody");
-    if (tbody) {
-      tbody.innerHTML = `<td colspan="14"><div class="empty-state">⏳ Daten werden geladen...</div>`;
-    }
-
-    fetchLeads()
-      .then((leads) => {
-        leadsData = leads;
-        fullLeadsData = leads;
-        populateFilterOptions();
-        renderKunden();
-      })
-      .catch((e) => {
-        console.error("Leads load failed", e);
-        if (tbody) {
-          tbody.innerHTML = `<td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div>`;
-        }
-        showToast("Kunden Daten konnten live nicht geladen werden.", "error", 3000);
-      })
-      .finally(() => {
-        isLoading = false;
-      });
-
-    fetchDashboardStats()
-      .then((stats) => {
-        dashboardStats = stats;
-        renderStats();
-      })
-      .catch((e) => {
-        console.warn("Dashboard stats load failed", e);
-      });
+  const tbody = document.getElementById("kunden-tbody");
+  if (tbody) {
+    tbody.innerHTML = `<td colspan="14"><div class="empty-state">⏳ Daten werden geladen...</div>`;
   }
 
+  fetchLeads()
+    .then((leads) => {
+      leadsData = leads;
+      fullLeadsData = leads;
+      populateFilterOptions();
+      protectFilterDropdowns();  // Add this line here
+      renderKunden();
+    })
+    .catch((e) => {
+      console.error("Leads load failed", e);
+      if (tbody) {
+        tbody.innerHTML = `<td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div>`;
+      }
+      showToast("Kunden Daten konnten live nicht geladen werden.", "error", 3000);
+    })
+    .finally(() => {
+      isLoading = false;
+    });
+
+  fetchDashboardStats()
+    .then((stats) => {
+      dashboardStats = stats;
+      renderStats();
+    })
+    .catch((e) => {
+      console.warn("Dashboard stats load failed", e);
+    });
+}
+
+// Protect filter dropdowns from being modified by other scripts
+// Protect filter dropdowns from being modified by other scripts
+function protectFilterDropdowns() {
+  // Protect bearbeiter filter
+  const bearbeiterSelect = document.getElementById("filter-bearbeiter");
+  if (bearbeiterSelect) {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'childList') {
+          // Check if incorrect options were added
+          let hasIncorrectOption = false;
+          const validValues = ["", "Philipp", "Martin", "André", "Simon"];
+          for (let i = 0; i < bearbeiterSelect.options.length; i++) {
+            const opt = bearbeiterSelect.options[i];
+            if (!validValues.includes(opt.value) && opt.value !== "") {
+              hasIncorrectOption = true;
+              break;
+            }
+          }
+          if (hasIncorrectOption) {
+            // Reset to fixed options
+            const currentValue = bearbeiterSelect.value;
+            bearbeiterSelect.innerHTML = '<option value="">Alle Bearbeiter</option>';
+            const fixedBearbeiter = ["Philipp", "Martin", "André", "Simon"];
+            fixedBearbeiter.forEach(name => {
+              const option = document.createElement("option");
+              option.value = name;
+              option.textContent = name;
+              bearbeiterSelect.appendChild(option);
+            });
+            if (fixedBearbeiter.includes(currentValue)) {
+              bearbeiterSelect.value = currentValue;
+            }
+          }
+        }
+      });
+    });
+    observer.observe(bearbeiterSelect, { childList: true, subtree: true });
+  }
+
+  // Protect delegieren filter
+  const delegierenSelect = document.getElementById("filter-delegieren");
+  if (delegierenSelect) {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'childList') {
+          // Check if incorrect options were added
+          let hasIncorrectOption = false;
+          const validValues = ["", "Philipp", "Martin", "André", "Simon"];
+          for (let i = 0; i < delegierenSelect.options.length; i++) {
+            const opt = delegierenSelect.options[i];
+            if (!validValues.includes(opt.value) && opt.value !== "") {
+              hasIncorrectOption = true;
+              break;
+            }
+          }
+          if (hasIncorrectOption) {
+            // Reset to fixed options
+            const currentValue = delegierenSelect.value;
+            delegierenSelect.innerHTML = '<option value="">Alle Delegieren</option>';
+            const fixedDelegieren = ["Philipp", "Martin", "André", "Simon"];
+            fixedDelegieren.forEach(name => {
+              const option = document.createElement("option");
+              option.value = name;
+              option.textContent = name;
+              delegierenSelect.appendChild(option);
+            });
+            if (fixedDelegieren.includes(currentValue)) {
+              delegierenSelect.value = currentValue;
+            }
+          }
+        }
+      });
+    });
+    observer.observe(delegierenSelect, { childList: true, subtree: true });
+  }
+}
+
   function populateFilterOptions() {
-    const uniqueStatuses = [...new Set(leadsData.map((lead) => lead.status).filter((s) => s && s !== "???" && s !== "?"))];
+    const uniqueStatuses = [
+      ...new Set(
+        leadsData
+          .map((lead) => String(lead.status || "").trim())
+          .filter((value) => value && value !== "???" && value !== "?"),
+      ),
+    ];
     const statusSelect = document.getElementById("filter-status");
     if (statusSelect) {
-      statusSelect.innerHTML = '<option value="">Alle Status</option>' +
+      const currentValue = statusSelect.value;
+      statusSelect.innerHTML =
+        '<option value="">Alle Status</option>' +
         uniqueStatuses
-          .map((status) => '<option value="' + escapeHtml(status) + '">' + escapeHtml(status) + '</option>')
-          .join('');
+          .map(
+            (status) =>
+              '<option value="' +
+              escapeHtml(status) +
+              '">' +
+              escapeHtml(status) +
+              "</option>",
+          )
+          .join("");
+      if (uniqueStatuses.includes(currentValue)) statusSelect.value = currentValue;
     }
 
-    const uniqueSources = [...new Set(leadsData.map((lead) => lead.quelle).filter((s) => s && s !== "???" && s !== "?"))];
+    const uniqueSources = [
+      ...new Set(
+        leadsData
+          .map((lead) => String(lead.quelle || "").trim())
+          .filter((value) => value && value !== "???" && value !== "?"),
+      ),
+    ];
     const sourceSelect = document.getElementById("filter-source");
     if (sourceSelect) {
-      sourceSelect.innerHTML = '<option value="">Alle Quellen</option>' +
+      const currentValue = sourceSelect.value;
+      sourceSelect.innerHTML =
+        '<option value="">Alle Quellen</option>' +
         uniqueSources
-          .map((source) => '<option value="' + escapeHtml(source) + '">' + escapeHtml(source) + '</option>')
-          .join('');
+          .map(
+            (source) =>
+              '<option value="' +
+              escapeHtml(source) +
+              '">' +
+              escapeHtml(source) +
+              "</option>",
+          )
+          .join("");
+      if (uniqueSources.includes(currentValue)) sourceSelect.value = currentValue;
     }
 
-    const uniqueBearbeiter = [...new Set(
-      leadsData
-        .map((lead) => String(lead.bearbeiter || "").trim())
-        .filter((value) => value && value !== "???" && value !== "?")
-    )];
     const bearbeiterSelect = document.getElementById("filter-bearbeiter");
     if (bearbeiterSelect) {
-      bearbeiterSelect.innerHTML = '<option value="">Alle Bearbeiter</option>' +
-        uniqueBearbeiter
-          .map((value) => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + '</option>')
-          .join('');
+      const currentValue = bearbeiterSelect.value;
+      bearbeiterSelect.innerHTML =
+        '<option value="">Alle Bearbeiter</option>' +
+        BEARBEITER_OPTIONS
+          .map(
+            (value) =>
+              '<option value="' +
+              escapeHtml(value) +
+              '">' +
+              escapeHtml(value) +
+              "</option>",
+          )
+          .join("");
+      if (BEARBEITER_OPTIONS.includes(currentValue)) bearbeiterSelect.value = currentValue;
     }
 
-    const uniqueDelegieren = [...new Set(
-      leadsData
-        .map((lead) => String(lead.delegieren || "").trim())
-        .filter((value) => value && value !== "???" && value !== "?")
-    )];
+    const uniqueDelegieren = [
+      ...new Set(
+        leadsData
+          .map((lead) => String(lead.delegieren || "").trim())
+          .filter((value) => value && value !== "???" && value !== "?"),
+      ),
+    ];
     const delegierenSelect = document.getElementById("filter-delegieren");
     if (delegierenSelect) {
-      delegierenSelect.innerHTML = '<option value="">Alle Delegieren</option>' +
+      const currentValue = delegierenSelect.value;
+      delegierenSelect.innerHTML =
+        '<option value="">Alle Delegieren</option>' +
         uniqueDelegieren
-          .map((value) => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + '</option>')
-          .join('');
+          .map(
+            (value) =>
+              '<option value="' +
+              escapeHtml(value) +
+              '">' +
+              escapeHtml(value) +
+              "</option>",
+          )
+          .join("");
+      if (uniqueDelegieren.includes(currentValue)) delegierenSelect.value = currentValue;
     }
   }
 
@@ -1159,6 +1310,10 @@ async function fetchActivityForLead(leadId) {
     return "badge-offen";
   }
 
+  function isInBearbeitungStatus(status) {
+    return String(status || "").trim().toLowerCase() === "in bearbeitung";
+  }
+
   function shouldShowPhoneIcon() {
     if (kundenActiveFilter === "bearbeitung") return false;
     if (kundenActiveFilter === "beauft") return false;
@@ -1185,7 +1340,7 @@ async function fetchActivityForLead(leadId) {
         label: "in Bearbeitung",
         icon: "📞",
         count: dashboardStats["in Bearbeitung"] || 0,
-        filter: (l) => l.status === "in Bearbeitung",
+        filter: (l) => isInBearbeitungStatus(l.status),
       },
       {
         key: "followup",
@@ -1472,72 +1627,194 @@ async function fetchActivityForLead(leadId) {
     modal.classList.add('active');
   }
 
-  function openEditStatusModal(leadId) {
-    const lead = leadsData.find(l => l.id === leadId);
-    if (!lead) return;
+function openEditStatusModal(leadId) {
+  const lead = leadsData.find((l) => String(l.id) === String(leadId));
+  if (!lead) return;
 
-    if (!checkedEdit.has(String(leadId)) && !isErstberatungChecked(lead)) {
-      showToast("Bitte aktivieren Sie zuerst die Beratung mit WAHR", "error", 2500);
-      return;
+  if (!checkedEdit.has(String(leadId)) && !isErstberatungChecked(lead)) {
+    showToast("Bitte aktivieren Sie zuerst die Beratung mit WAHR", "error", 2500);
+    return;
+  }
+  
+  const getStatusModalConfig = () => {
+    if (kundenActiveFilter === "bearbeitung") {
+      return {
+        title: "im Gange",
+        placeholder: "Wählen Sie eine Option aus",
+        options: BEARBEITUNG_STATUS_OPTIONS,
+      };
     }
-    
-    const modalHtml = `
-      <div id="editStatusModal" class="k-modal-overlay">
-        <div class="k-modal-content" style="max-width: 450px;">
-          <div class="k-modal-header">
-            <h3>Status ändern - ${escapeHtml(lead.name)}</h3>
-            <button class="k-close-btn" id="closeEditStatusModal">&times;</button>
+
+    if (kundenActiveFilter === "followup") {
+      return {
+        title: "Nachverfolgen",
+        placeholder: "Wählen Sie eine Option...",
+        options: FOLLOW_UP_STATUS_OPTIONS,
+      };
+    }
+
+    if (kundenActiveFilter === "beauft") {
+      return {
+        title: "Beauftragung",
+        placeholder: "Choose an Beauftragung",
+        options: BEAUFTRAGUNG_STATUS_OPTIONS,
+      };
+    }
+
+    return {
+      title: "Status ändern",
+      placeholder: "",
+      options: client_STATUS_OPTIONS,
+    };
+  };
+
+  const modalConfig = getStatusModalConfig();
+  const selectedValue = modalConfig.options.includes(lead.status) ? lead.status : "";
+
+  const modalHtml = `
+    <div id="editStatusModal" class="k-modal-overlay">
+      <div class="k-modal-content" style="max-width: 450px;">
+        <div class="k-modal-header">
+          <h3>${escapeHtml(modalConfig.title)}</h3>
+          <button class="k-close-btn" id="closeEditStatusModal">&times;</button>
+        </div>
+        <div class="k-modal-body">
+          <div class="form-group" style="margin-bottom: 20px;">
+            <select id="editStatusSelect" class="k-full-select">
+              ${modalConfig.placeholder ? `<option value="">${escapeHtml(modalConfig.placeholder)}</option>` : ""}
+              ${modalConfig.options.map(opt => `<option value="${opt}" ${selectedValue === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+            </select>
           </div>
-          <div class="k-modal-body">
-            <div class="form-group" style="margin-bottom: 20px;">
-              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Status auswählen:</label>
-              <select id="editStatusSelect" class="k-full-select">
-                ${EDIT_STATUS_OPTIONS.map(opt => `<option value="${opt}" ${lead.status === opt ? 'selected' : ''}>${opt}</option>`).join('')}
-              </select>
-            </div>
-            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
-              <button type="button" id="cancelEditStatus" class="k-btn-outline" style="padding: 10px 24px;">Abbrechen</button>
-              <button type="button" id="saveEditStatus" class="k-btn-green" style="padding: 10px 24px;">Speichern</button>
-            </div>
+          <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+            <button type="button" id="cancelEditStatus" class="k-btn-outline" style="padding: 10px 24px;">Abbrechen</button>
+            <button type="button" id="saveEditStatus" class="k-btn-green" style="padding: 10px 24px;">Speichern</button>
           </div>
         </div>
       </div>
-    `;
-    
-    const existingModal = document.getElementById("editStatusModal");
-    if (existingModal) existingModal.remove();
-    
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    const modal = document.getElementById("editStatusModal");
-    const closeBtn = document.getElementById("closeEditStatusModal");
-    const cancelBtn = document.getElementById("cancelEditStatus");
-    const saveBtn = document.getElementById("saveEditStatus");
-    
-    const closeModal = () => {
-      modal.classList.remove('active');
-      setTimeout(() => modal.remove(), 300);
-    };
-    
-    closeBtn?.addEventListener('click', closeModal);
-    cancelBtn?.addEventListener('click', closeModal);
-    modal?.addEventListener('click', (e) => {
-      if (e.target === modal) closeModal();
-    });
-    
-    saveBtn?.addEventListener('click', () => {
-      const newStatus = document.getElementById("editStatusSelect")?.value;
-      if (newStatus) {
-        lead.status = newStatus;
-        lead.statusClass = getStatusClass(newStatus);
-        console.log(`Lead ${leadId} status updated to ${newStatus}`);
-        renderKunden();
-      }
+    </div>
+  `;
+  
+  const existingModal = document.getElementById("editStatusModal");
+  if (existingModal) existingModal.remove();
+  
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  
+  const modal = document.getElementById("editStatusModal");
+  const closeBtn = document.getElementById("closeEditStatusModal");
+  const cancelBtn = document.getElementById("cancelEditStatus");
+  const saveBtn = document.getElementById("saveEditStatus");
+  
+  const closeModal = () => {
+    modal.classList.remove('active');
+    setTimeout(() => modal.remove(), 300);
+  };
+  
+  closeBtn?.addEventListener('click', closeModal);
+  cancelBtn?.addEventListener('click', closeModal);
+  modal?.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  
+  saveBtn?.addEventListener('click', async () => {
+    const newStatus = document.getElementById("editStatusSelect")?.value;
+    const previousStatus = lead.status;
+
+    if (!newStatus) {
+      showToast("Bitte wählen Sie einen Status aus", "error", 2200);
+      return;
+    }
+
+    if (newStatus === previousStatus) {
       closeModal();
-    });
-    
-    modal.classList.add('active');
-  }
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Wird gespeichert...";
+
+    try {
+      const payload = buildLeadUpdatePayload(lead, {
+        id: String(lead.id),
+        lead_id: String(lead.id),
+        status: newStatus,
+      });
+
+      await updateLeadOnAPI(lead.id, payload);
+
+      // IMPORTANT: Update dashboard stats BEFORE updating the lead object
+      // Map status to dashboard keys
+      const getDashboardKey = (status) => {
+        if (status === "follow up") return "follow up";
+        if (status === "in Bearbeitung") return "in Bearbeitung";
+        if (status === "Offen") return "Offen";
+        if (status === "Nur Info eingeholt") return "Nur Info eingeholt";
+        if (status === "falscher Kunde") return "falscher Kunde";
+        return status;
+      };
+      
+      const oldKey = getDashboardKey(previousStatus);
+      const newKey = getDashboardKey(newStatus);
+      
+      // Update dashboard stats
+      if (dashboardStats[oldKey] !== undefined) {
+        dashboardStats[oldKey] = Math.max(0, (dashboardStats[oldKey] || 0) - 1);
+      }
+      if (dashboardStats[newKey] !== undefined) {
+        dashboardStats[newKey] = (dashboardStats[newKey] || 0) + 1;
+      } else {
+        dashboardStats[newKey] = 1;
+      }
+      
+      // Also update the multi-status counts for Beauftragung if needed
+      if (previousStatus === "Beauftragung") {
+        dashboardStats.Beauftragung = Math.max(0, (dashboardStats.Beauftragung || 0) - 1);
+      } else if (previousStatus === "EA Beauftragung") {
+        dashboardStats["EA Beauftragung"] = Math.max(0, (dashboardStats["EA Beauftragung"] || 0) - 1);
+      } else if (previousStatus === "NF Beauftragung") {
+        dashboardStats["NF Beauftragung"] = Math.max(0, (dashboardStats["NF Beauftragung"] || 0) - 1);
+      }
+      
+      if (newStatus === "Beauftragung") {
+        dashboardStats.Beauftragung = (dashboardStats.Beauftragung || 0) + 1;
+      } else if (newStatus === "EA Beauftragung") {
+        dashboardStats["EA Beauftragung"] = (dashboardStats["EA Beauftragung"] || 0) + 1;
+      } else if (newStatus === "NF Beauftragung") {
+        dashboardStats["NF Beauftragung"] = (dashboardStats["NF Beauftragung"] || 0) + 1;
+      }
+
+      // Update the lead object
+      lead.status = newStatus;
+      lead.statusClass = getStatusClass(newStatus);
+      
+      // Queue pending update
+      queuePendingUpdate(lead.id, {
+        status: newStatus,
+        statusClass: lead.statusClass,
+      });
+
+      // Clear caches to force refresh
+      activityCache.delete(String(lead.id));
+      notesCache.delete(String(lead.id));
+      
+      console.log(`Lead ${leadId} status updated from ${previousStatus} to ${newStatus}`);
+      showToast(`Status wurde auf ${newStatus} gesetzt`, "success", 2200);
+      
+      // Re-render everything
+      saveJsonCache(KUNDEN_DASHBOARD_CACHE_KEY, dashboardStats);
+      renderStats();  // Update stats display first
+      renderKunden(); // Then re-render the table (this applies the active filter)
+      closeModal();
+      
+    } catch (err) {
+      console.error("Status update failed:", err);
+      showToast(err.message || "Status Update fehlgeschlagen", "error", 3000);
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Speichern";
+    }
+  });
+  
+  modal.classList.add('active');
+}
 
   // ========== Full Edit Popup with API Integration ==========
   function openFullEditModal(leadId) {
