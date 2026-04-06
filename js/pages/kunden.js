@@ -1498,6 +1498,67 @@ function protectFilterDropdowns() {
     
     sendBtn?.addEventListener('click', () => {
       const selectedTemplate = document.getElementById("email-template-select")?.value || "";
+      const validEmailData = selectedLeads
+        .map((lead) => ({
+          id: lead.id,
+          name: (lead.salutation ? lead.salutation + " " : "") + lead.name,
+          email: String(lead.email || "").trim(),
+          datum: lead.datum,
+        }))
+        .filter((lead) => lead.email);
+
+      if (!selectedTemplate) {
+        showToast("Bitte wählen Sie eine E-Mail-Vorlage aus", "error", 2200);
+        return;
+      }
+
+      if (!validEmailData.length) {
+        showToast("Keine gültigen E-Mail-Adressen vorhanden", "error", 2200);
+        return;
+      }
+
+      const templateContent = {
+        E1: { subject: "Kunden Update - E1", body: "Hallo,\n\nhier ist E-Mail Vorlage E1.\n\nViele Grüße" },
+        E2: { subject: "Kunden Update - E2", body: "Hallo,\n\nhier ist E-Mail Vorlage E2.\n\nViele Grüße" },
+        E3: { subject: "Kunden Update - E3", body: "Hallo,\n\nhier ist E-Mail Vorlage E3.\n\nViele Grüße" },
+        E4: { subject: "Kunden Update - E4", body: "Hallo,\n\nhier ist E-Mail Vorlage E4.\n\nViele Grüße" },
+        E5: { subject: "Kunden Update - E5", body: "Hallo,\n\nhier ist E-Mail Vorlage E5.\n\nViele Grüße" },
+        E6: { subject: "Kunden Update - E6", body: "Hallo,\n\nhier ist E-Mail Vorlage E6.\n\nViele Grüße" },
+        E7: { subject: "Kunden Update - E7", body: "Hallo,\n\nhier ist E-Mail Vorlage E7.\n\nViele Grüße" },
+        E8: { subject: "Kunden Update - E8", body: "Hallo,\n\nhier ist E-Mail Vorlage E8.\n\nViele Grüße" },
+        E9: { subject: "Kunden Update - E9", body: "Hallo,\n\nhier ist E-Mail Vorlage E9.\n\nViele Grüße" },
+        E10: { subject: "Kunden Update - E10", body: "Hallo,\n\nhier ist E-Mail Vorlage E10.\n\nViele Grüße" },
+      };
+
+      const selectedTemplateContent = templateContent[selectedTemplate];
+      if (!selectedTemplateContent) {
+        showToast("Ungültige E-Mail-Vorlage", "error", 2200);
+        return;
+      }
+
+      const recipients = validEmailData.map((item) => item.email);
+      const composeBaseUrl = "https://hex2013.com/owa/?path=/mail/action/compose";
+      const params = new URLSearchParams();
+
+      if (recipients.length === 1) {
+        params.set("to", recipients[0]);
+      } else {
+        params.set("bcc", recipients.join(";"));
+      }
+
+      params.set("subject", selectedTemplateContent.subject);
+      params.set("body", selectedTemplateContent.body);
+
+      const composeUrl = `${composeBaseUrl}&${params.toString()}`;
+      const composeWindow = window.open(composeUrl, "_blank");
+      if (!composeWindow) {
+        showToast("E-Mail-Fenster konnte nicht geöffnet werden", "error", 2600);
+        return;
+      }
+
+      showToast(`E-Mail-Fenster für ${validEmailData.length} Empfänger geöffnet`, "success", 3000);
+      closeModal();
+      return;
       
       const emailData = selectedLeads.map(lead => {
         return {
