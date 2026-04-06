@@ -1231,19 +1231,12 @@ function protectFilterDropdowns() {
       if (BEARBEITER_OPTIONS.includes(currentValue)) bearbeiterSelect.value = currentValue;
     }
 
-    const uniqueDelegieren = [
-      ...new Set(
-        leadsData
-          .map((lead) => String(lead.delegieren || "").trim())
-          .filter((value) => value && value !== "???" && value !== "?"),
-      ),
-    ];
     const delegierenSelect = document.getElementById("filter-delegieren");
     if (delegierenSelect) {
       const currentValue = delegierenSelect.value;
       delegierenSelect.innerHTML =
         '<option value="">Alle Delegieren</option>' +
-        uniqueDelegieren
+        BEARBEITER_OPTIONS
           .map(
             (value) =>
               '<option value="' +
@@ -1253,7 +1246,7 @@ function protectFilterDropdowns() {
               "</option>",
           )
           .join("");
-      if (uniqueDelegieren.includes(currentValue)) delegierenSelect.value = currentValue;
+      if (BEARBEITER_OPTIONS.includes(currentValue)) delegierenSelect.value = currentValue;
     }
   }
 

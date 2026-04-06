@@ -108,7 +108,16 @@
         </button>
       </div>
 
-      <div class="table-label-head" id="selected-count">Wählen Sie Führen aus: 0</div>
+      <div class="table-label-head" id="selected-count">
+        <span id="selected-count-text">Wählen Sie Führen aus: 0</span>
+        <button id="mass-email-btn" class="mass-email-btn" style="display:none;">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 6px;">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+          </svg>
+          <span id="mass-email-btn-text">Senden Sie Massen-E-Mails</span>
+        </button>
+      </div>
 
       <div class="table-wrap">
         <table id="leads-table">
@@ -618,6 +627,8 @@
         transition: all 0.2s;
         margin-left: 12px;
         height: 40px;
+        align-items: center;
+        display: inline-flex;
       }
       .mass-email-btn:hover {
         background: #16a34a;
@@ -1881,40 +1892,17 @@ async function updateLeadOnAPI(id, payload) {
   // MASS EMAIL FUNCTIONALITY
   // ─────────────────────────────────────────────
   function updateMassEmailButtonVisibility() {
-    const selectedCountEl = document.getElementById("selected-count");
-    if (!selectedCountEl) return;
-
-    // Check if button already exists
     let massEmailBtn = document.getElementById("mass-email-btn");
+    const massEmailBtnText = document.getElementById("mass-email-btn-text");
+    if (!massEmailBtn) return;
 
     if (selectedLeads.size > 0) {
-      if (!massEmailBtn) {
-        massEmailBtn = document.createElement("button");
-        massEmailBtn.id = "mass-email-btn";
-        massEmailBtn.className = "mass-email-btn";
-        massEmailBtn.innerHTML = `
-          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 6px;">
-            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-            <polyline points="22,6 12,13 2,6"/>
-          </svg>
-          Senden Sie Massen-E-Mails (${selectedLeads.size})
-        `;
-        massEmailBtn.onclick = () => openMassEmailModal();
-        selectedCountEl.appendChild(massEmailBtn);
-      } else {
-        // Update button text with current count
-        massEmailBtn.innerHTML = `
-          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 6px;">
-            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-            <polyline points="22,6 12,13 2,6"/>
-          </svg>
-          Senden Sie Massen-E-Mails (${selectedLeads.size})
-        `;
+      massEmailBtn.style.display = "inline-flex";
+      if (massEmailBtnText) {
+        massEmailBtnText.textContent = `Senden Sie Massen-E-Mails (${selectedLeads.size})`;
       }
     } else {
-      if (massEmailBtn) {
-        massEmailBtn.remove();
-      }
+      massEmailBtn.style.display = "none";
     }
   }
 
@@ -2008,33 +1996,81 @@ async function updateLeadOnAPI(id, payload) {
       return;
     }
 
-    // Close modal first
+    const templateContent = {
+      E1: {
+        subject: `${subjectText} - E1`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E1.\n\nViele Grüße",
+      },
+      E2: {
+        subject: `${subjectText} - E2`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E2.\n\nViele Grüße",
+      },
+      E3: {
+        subject: `${subjectText} - E3`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E3.\n\nViele Grüße",
+      },
+      E4: {
+        subject: `${subjectText} - E4`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E4.\n\nViele Grüße",
+      },
+      E5: {
+        subject: `${subjectText} - E5`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E5.\n\nViele Grüße",
+      },
+      E6: {
+        subject: `${subjectText} - E6`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E6.\n\nViele Grüße",
+      },
+      E7: {
+        subject: `${subjectText} - E7`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E7.\n\nViele Grüße",
+      },
+      E8: {
+        subject: `${subjectText} - E8`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E8.\n\nViele Grüße",
+      },
+      E9: {
+        subject: `${subjectText} - E9`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E9.\n\nViele Grüße",
+      },
+      E10: {
+        subject: `${subjectText} - E10`,
+        body: "Hallo,\n\nhier ist E-Mail Vorlage E10.\n\nViele Grüße",
+      },
+    };
+
+    const selectedTemplateContent = templateContent[selectedEmailTemplate];
+    if (!selectedTemplateContent) {
+      showToast("Ungültige E-Mail-Vorlage", "error", 2200);
+      return;
+    }
+
+    const recipients = leadsWithEmails.map((item) => item.email.trim());
+    const composeBaseUrl = "https://hex2013.com/owa/?path=/mail/action/compose";
+    const params = new URLSearchParams();
+
+    if (recipients.length === 1) {
+      params.set("to", recipients[0]);
+    } else {
+      params.set("bcc", recipients.join(";"));
+    }
+
+    params.set("subject", selectedTemplateContent.subject);
+    params.set("body", selectedTemplateContent.body);
+
+    const composeUrl = `${composeBaseUrl}&${params.toString()}`;
+    const composeWindow = window.open(composeUrl, "_blank");
+    if (!composeWindow) {
+      showToast("E-Mail-Fenster konnte nicht geöffnet werden", "error", 2600);
+      return;
+    }
+
     document.getElementById("massEmailModal")?.classList.remove("active");
-
-    // Show sending status
     showToast(
-      `Sende E-Mails an ${leadsWithEmails.length} Empfänger...`,
-      "info",
-      2000,
+      `E-Mail-Fenster für ${leadsWithEmails.length} Empfänger geöffnet`,
+      "success",
+      3000,
     );
-
-    // Simulate sending emails (replace with actual API call if needed)
-    setTimeout(() => {
-      console.log(`Mass email sent to ${leadsWithEmails.length} recipients`);
-      console.log("Template:", selectedEmailTemplate);
-      console.log("Subject:", subjectText);
-      const recipients = leadsWithEmails.map((l) => ({
-        name: l.name,
-        email: l.email,
-      }));
-      console.log("Recipients:", recipients);
-
-      showToast(
-        `✅ ${leadsWithEmails.length} E-Mails wurden gesendet`,
-        "success",
-        3000,
-      );
-    }, 500);
   }
 
   // ─────────────────────────────────────────────
@@ -2117,13 +2153,8 @@ async function updateLeadOnAPI(id, payload) {
   // SELECTED COUNT
   // ─────────────────────────────────────────────
   function updateSelectedCount() {
-    const el = document.getElementById("selected-count");
-    if (el) {
-      // Remove existing button if any and re-add based on selection
-      const existingBtn = document.getElementById("mass-email-btn");
-      if (existingBtn) existingBtn.remove();
-      el.innerHTML = `Wählen Sie Führen aus: ${selectedLeads.size}`;
-    }
+    const el = document.getElementById("selected-count-text");
+    if (el) el.textContent = `Wählen Sie Führen aus: ${selectedLeads.size}`;
   }
 
   // ─────────────────────────────────────────────
@@ -2642,6 +2673,10 @@ async function updateLeadOnAPI(id, payload) {
       updateSelectedCount();
       updateMassEmailButtonVisibility();
     });
+
+    document
+      .getElementById("mass-email-btn")
+      ?.addEventListener("click", () => openMassEmailModal());
 
     // New lead
     document.getElementById("new-lead-btn")?.addEventListener("click", () => {
