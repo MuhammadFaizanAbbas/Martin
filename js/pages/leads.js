@@ -32,6 +32,7 @@
   let currentStatus = "";
   let currentQuelle = "";
   let currentBearbeiter = "";  // Add this line
+  let currentDelegieren = "";  // Add this line
 
   // ─────────────────────────────────────────────
   // HTML TEMPLATE
@@ -91,12 +92,12 @@
           <option value="Martin">Martin</option>
           <option value="Simon">Simon</option>
           </select>
-          <select class="select-box" id="filter-delegieren">
-          <option value="">Alle delegieren</option>
-          <option value="philipp">Philipp</option>
-          <option value="andré">André</option>
-          <option value="martin">Martin</option>
-          <option value="simon">Simon</option>
+<select class="select-box" id="filter-delegieren">      
+    <option value="">Alle Delegieren</option>
+          <option value="Philipp">Philipp</option>
+          <option value="André">André</option>
+          <option value="Martin">Martin</option>
+          <option value="Simon">Simon</option>
           </select>
         <div class="spacer"></div>
         <button class="btn-primary" id="new-lead-btn">
@@ -124,14 +125,11 @@
               <th>Delegieren</th>
               <th>Summe Netto</th>
               <th>Datum</th>
-              <th>Anruf</th>
-              <th>E-Mail</th>
-              <th>Notiz</th>
-              <th></th>
+              <th>Aktionen</th>
               </tr>
           </thead>
           <tbody id="leads-tbody">
-            <tr><td colspan="15"><div class="empty-state loading-state">⏳ Daten werden geladen...</div></tr>
+            <tr><td colspan="12"><div class="empty-state loading-state">⏳ Daten werden geladen...</div></td></tr>
           </tbody>
         </table>
       </div>
@@ -165,11 +163,11 @@
           <div class="form-group"><label>Salutation</label><select id="editSalutation"><option value="">Wählen...</option><option value="Herr">Herr</option><option value="Frau">Frau</option><option value="Divers">Divers</option></select></div>
           <div class="form-group"><label>Name *</label><input type="text" id="editName" placeholder="Geben Sie den Namen ein" required></div>
           <div class="form-group"><label>Briefberatung Telefon</label>
-          <select id="editBriefberatungTelefon">
-          <option value="">Wählen...</option>
-          <option value="Ja">FALSCH</option>
-          <option value="Nein">WAHR</option>
-          </select></div>
+<select id="editBriefberatungTelefon">
+  <option value="">Wählen...</option>
+  <option value="Ja">FALSCH</option>
+  <option value="Nein">WAHR</option>
+</select>
           <div class="form-group"><label>Straße Objekt</label><input type="text" id="editStrasseObjekt" placeholder="Hausanschrift..."></div>
           <div class="form-group"><label>Angebot</label><input type="text" id="editAngebot" placeholder="Angebot eingeben"></div>
           <div class="form-row">
@@ -241,6 +239,7 @@
             <div class="form-group"><label>Nachfassen</label><input type="date" id="editNachfassen"></div>
           </div>
           <div class="form-group"><label>Bearbeiter</label><select id="editBearbeiter"><option value="">Wählen...</option><option value="Philipp">Philipp</option><option value="André">André</option><option value="Martin">Martin</option><option value="Simon">Simon</option></select></div>
+          <div class="form-group"><label>Delegieren</label><select id="editDelegieren"><option value="">Wählen...</option><option value="Philipp">Philipp</option><option value="André">André</option><option value="Martin">Martin</option><option value="Simon">Simon</option></select></div>
           <div class="form-group"><label>Summe Netto</label><input type="text" id="editSumme" placeholder="Betrag"></div>
           <div class="form-row">
             <div class="form-group"><label>Dachfläche m²</label><input type="text" id="editDachflaeche" placeholder="Dachfläche"></div>
@@ -416,79 +415,101 @@
     styles.id = "leads-styles";
     styles.textContent = `
       .leads-container { width: 100%; }
-      .page-title { font-size: 1.8rem; font-weight: 700; color: #0f172a; margin-bottom: 20px; }
-      .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
-      .search-box { display: flex; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 40px; padding: 8px 16px; gap: 8px; }
-      .search-box input { border: none; outline: none; font-size: 0.85rem; width: 200px; }
-      .select-box { padding: 8px 16px; border: 1px solid #e2e8f0; border-radius: 40px; background: white; font-size: 0.85rem; cursor: pointer; }
-      .spacer { flex: 1; }
-      .btn-primary { background: #3b82f6; color: white; border: none; padding: 8px 20px; border-radius: 40px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; }
+      .page-title { font-size: 1.6rem; font-weight: 700; color: #0f172a; margin-bottom: 16px; }
+      .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+      .search-box { display: flex; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 40px; padding: 6px 12px; gap: 6px; }
+      .search-box input { border: none; outline: none; font-size: 0.8rem; width: 150px; }
+      .select-box { padding: 6px 12px; border: 1px solid #e2e8f0; border-radius: 40px; background: white; font-size: 0.8rem; cursor: pointer; }
+      .spacer { flex: 1; min-width: 12px; }
+      .btn-primary { background: #3b82f6; color: white; border: none; padding: 6px 16px; border-radius: 40px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; font-size: 0.8rem; white-space: nowrap; }
       .btn-primary:hover { background: #2563eb; }
-      .btn-secondary { background: #f1f5f9; color: #334155; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
-      .table-label { margin: 16px 0; font-size: 0.85rem; color: #64748b; }
-      .table-label-head { margin: 16px 0; font-size: 0.85rem; color: #64748b;    display: flex;
+      .btn-secondary { background: #f1f5f9; color: #334155; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; }
+      .table-label { margin: 12px 0; font-size: 0.8rem; color: #64748b; }
+      .table-label-head { margin: 12px 0; font-size: 0.8rem; color: #64748b;    display: flex;
     align-items: center;
     justify-content: space-between; }
-      .table-wrap { overflow-x: auto; background: white; border-radius: 16px; border: 1px solid #eef2f8; }
-      #leads-table { width: 100%; border-collapse: collapse; min-width: 1400px; }
-      #leads-table th { text-align: left; padding: 14px 12px; background: #f8fafc; color: #475569; font-weight: 600; font-size: 0.8rem; border-bottom: 1px solid #e2e8f0; }
-      #leads-table td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem; }
+      .table-wrap {  background: white; border-radius: 16px; border: 1px solid #eef2f8; scrollbar-gutter: stable; }
+      #leads-table { width: 100%; border-collapse: collapse; min-width: auto; table-layout: fixed; }
+      #leads-table th { text-align: left; padding: 9px 6px; background: #f8fafc; color: #475569; font-weight: 600; font-size: 0.75rem; border-bottom: 1px solid #e2e8f0; white-space: nowrap; vertical-align: middle; }
+      #leads-table td { padding: 8px 4px; border-bottom: 1px solid #f1f5f9; font-size: 0.78rem; line-height: 1.35; vertical-align: middle; overflow-wrap: anywhere; }
       #leads-table tr:hover td { background: #f8fafc; }
-      .cb { width: 18px; height: 18px; cursor: pointer; }
-      .expand-btn { background: none; border: none; cursor: pointer; padding: 4px 8px; color: #64748b; transition: transform 0.2s; }
+      #leads-table th:nth-child(1), #leads-table td:nth-child(1) { width: 34px; }
+      #leads-table th:nth-child(2), #leads-table td:nth-child(2) { width: 34px; }
+      #leads-table th:nth-child(3), #leads-table td:nth-child(3) { width: 100px; padding-right: 3px; }
+      #leads-table th:nth-child(4), #leads-table td:nth-child(4) { width: 70px; padding-left: 3px; }
+      #leads-table th:nth-child(5), #leads-table td:nth-child(5) { width: 92px; }
+      #leads-table th:nth-child(6), #leads-table td:nth-child(6) { width: 78px; }
+      #leads-table th:nth-child(7), #leads-table td:nth-child(7) { width: 78px; }
+      #leads-table th:nth-child(8), #leads-table td:nth-child(8) { width: 80px; }
+      #leads-table th:nth-child(9), #leads-table td:nth-child(9) { width: 52px; text-align: center; }
+      #leads-table th:nth-child(10), #leads-table td:nth-child(10) { width: 78px; }
+      #leads-table th:nth-child(11), #leads-table td:nth-child(11) { width: 82px; }
+      #leads-table th:nth-child(12), #leads-table td:nth-child(12) { width: 152px; }
+      .cb { width: 16px; height: 16px; cursor: pointer; }
+      .expand-btn { background: none; border: none; cursor: pointer; padding: 3px 6px; color: #64748b; transition: transform 0.2s; }
       .expand-btn.open svg { transform: rotate(90deg); }
-      .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 500; }
+      .badge { display: inline-block; padding: 3px 10px; border-radius: 16px; font-size: 0.65rem; font-weight: 500; }
       .badge-follow { background: #dbeafe; color: #1e40af; }
       .badge-offen { background: #fef3c7; color: #92400e; }
       .badge-info { background: #e0e7ff; color: #4338ca; }
       .badge-beauft { background: #dcfce7; color: #166534; }
       .badge-bearbeitung { background: #fed7aa; color: #9a3412; }
-      .tag { display: inline-block; padding: 4px 8px; background: #f1f5f9; border-radius: 12px; font-size: 0.7rem; }
-      .assignee-chip { display: inline-block; padding: 4px 10px; background: #eef2ff; border-radius: 20px; font-size: 0.7rem; font-weight: 500; color: #4f46e5; }
-      .lead-id { font-size: 0.72rem; color: #94a3b8; margin-top: 2px; }
+      .tag { display: inline-block; padding: 3px 6px; background: #f1f5f9; border-radius: 10px; font-size: 0.65rem; }
+      .assignee-chip { display: inline-block; padding: 3px 8px; background: #eef2ff; border-radius: 16px; font-size: 0.65rem; font-weight: 500; color: #4f46e5; }
+      .lead-id { font-size: 0.65rem; color: #94a3b8; margin-top: 1px; }
+      .lead-name { display: block; font-weight: 600; color: #0f172a; white-space: normal; overflow-wrap: anywhere; }
+      .badge, .tag, .assignee-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
       .amount { font-weight: 600; color: #0f172a; }
-      .date-cell { color: #64748b; font-size: 0.75rem; }
-      .act-btn { background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 6px; color: #64748b; transition: all 0.2s; }
+      .date-cell { color: #64748b; font-size: 0.7rem; }
+      .delegate-dot {     display: inline-block;
+    padding: 3px 8px;
+    background: #eef2ff;
+    border-radius: 16px;
+    font-size: 0.65rem;
+    font-weight: 500;
+ border-radius: 20px; background: #f1f5f9; border: 1px solid #e2e8f0; margin: 0 auto; }
+      .act-btn { background: none; border: none; cursor: pointer; width: 28px; height: 28px; padding: 0; border-radius: 6px; color: #64748b; transition: all 0.2s; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
       .act-btn:hover { background: #f1f5f9; color: #3b82f6; }
-      .actions { display: flex; gap: 4px; }
+      .actions-cell { white-space: nowrap; }
+      .actions { display: flex; gap: 3px; flex-wrap: nowrap; align-items: center; justify-content: flex-start; }
       .expand-row { display: none; background: #f9fafb; }
       .expand-row.open { display: table-row; }
-      .expand-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px; }
+      .expand-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px; }
       .expand-item { display: flex; flex-direction: column; }
-      .expand-item label { font-size: 0.7rem; color: #64748b; margin-bottom: 4px; }
-      .expand-item span { font-size: 0.85rem; font-weight: 500; color: #0f172a; }
+      .expand-item label { font-size: 0.65rem; color: #64748b; margin-bottom: 3px; }
+      .expand-item span { font-size: 0.8rem; font-weight: 500; color: #0f172a; }
 
       /* ── Pagination ── */
       .pagination-container {
         display: flex;
         justify-content: center;
         align-items: center;
-        gap: 12px;
-        margin-top: 24px;
-        padding: 16px;
+        gap: 8px;
+        margin-top: 16px;
+        padding: 12px;
         flex-wrap: wrap;
       }
       .pagination-btn {
         background: #f1f5f9;
         border: 1px solid #e2e8f0;
-        padding: 8px 20px;
+        padding: 6px 16px;
         border-radius: 8px;
         cursor: pointer;
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         font-weight: 500;
         transition: all 0.2s;
       }
       .pagination-btn:hover:not(:disabled) { background: #3b82f6; color: white; border-color: #3b82f6; }
       .pagination-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-      .pagination-pages { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+      .pagination-pages { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
       .pagination-page-btn {
-        min-width: 36px;
-        height: 36px;
-        padding: 0 8px;
+        min-width: 32px;
+        height: 32px;
+        padding: 0 6px;
         border-radius: 8px;
         border: 1px solid #e2e8f0;
         background: white;
-        font-size: 0.82rem;
+        font-size: 0.75rem;
         font-weight: 500;
         cursor: pointer;
         transition: all 0.2s;
@@ -498,15 +519,15 @@
       }
       .pagination-page-btn:hover { background: #eff6ff; border-color: #3b82f6; color: #3b82f6; }
       .pagination-page-btn.active { background: #3b82f6; color: white; border-color: #3b82f6; }
-      .pagination-info { font-size: 0.82rem; color: #64748b; white-space: nowrap; }
-      .pagination-dots { color: #94a3b8; font-size: 0.85rem; padding: 0 4px; }
-      .pagination-rows-per-page { margin-left: 16px; }
+      .pagination-info { font-size: 0.75rem; color: #64748b; white-space: nowrap; }
+      .pagination-dots { color: #94a3b8; font-size: 0.75rem; padding: 0 2px; }
+      .pagination-rows-per-page { margin-left: 12px; }
       .rows-per-page-select {
-        padding: 6px 12px;
+        padding: 4px 10px;
         border: 1px solid #e2e8f0;
-        border-radius: 8px;
+        border-radius: 6px;
         background: white;
-        font-size: 0.82rem;
+        font-size: 0.75rem;
         cursor: pointer;
       }
 
@@ -527,7 +548,7 @@
   background: rgba(0,0,0,0.3); 
   z-index: 2000; 
 }
-.panel-overlay.active { display: block; }
+// .panel-overlay.active { display: block; }
 .side-panel { 
   position: fixed; 
   z-index: 99999;  /* Increased from 99999 to ensure it's above everything */
@@ -633,6 +654,10 @@
         .view-detail-label { width: 100%; margin-bottom: 4px; }
         .pagination-container { flex-direction: column; align-items: center; }
         .pagination-rows-per-page { margin-left: 0; margin-top: 10px; }
+      }
+
+      @media (max-width: 768px) {
+        #leads-table { min-width: 860px; table-layout: auto; }
       }
 
       /* Activity timeline */
@@ -778,6 +803,7 @@
     const candidates = [
       preferred,
       typeof currentBearbeiter === "string" ? currentBearbeiter : "",
+
     ];
     for (const value of candidates) {
       const normalized = String(value || "").trim();
@@ -805,6 +831,7 @@
       user: actor,
       created_by: actor,
       phone: meta.phone || "",
+      email: meta.email || "",
       lead_name: meta.leadName || "",
       timestamp: new Date().toISOString(),
     };
@@ -943,7 +970,7 @@
   async function refreshLeads() {
     const tbody = document.getElementById("leads-tbody");
     if (tbody)
-      tbody.innerHTML = `</table><td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div></td>`;
+      tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state loading-state">⏳ Lade Daten...</div></td></tr>`;
     fullLeadsData = [];
     expandedRows.clear();
     selectedLeads.clear();
@@ -1026,6 +1053,7 @@
       statusClass: getStatusClass(status),
       quelle: apiLead.lead_quelle || "—",
       bearbeiter: apiLead.bearbeiter || "—",
+      delegieren: apiLead.delegieren || "—",
       kategorie: apiLead.sale_typ || "—",
       summe:
         apiLead.summe_netto && apiLead.summe_netto !== "0.00"
@@ -1438,7 +1466,7 @@ async function updateLeadOnAPI(id, payload) {
   function showLeadsLoadError(message) {
     const tbody = document.getElementById("leads-tbody");
     if (!tbody) return;
-    tbody.innerHTML = `<td colspan="15"><div class="empty-state error-state">⚠️ ${message}</div></td>`;
+    tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state error-state">⚠️ ${message}</div></td></tr>`;
   }
 
   // ─────────────────────────────────────────────
@@ -1554,6 +1582,7 @@ async function updateLeadOnAPI(id, payload) {
   // ─────────────────────────────────────────────
   async function fetchActivityForLead(leadId) {
     const cacheBust = `_ts=${Date.now()}`;
+    const activityKey = String(leadId);
     // Normalizer tolerant to different API field names
     const normalize = (a) => {
       const text =
@@ -1594,17 +1623,24 @@ async function updateLeadOnAPI(id, payload) {
     };
 
     async function tryFetch(url) {
-      const r = await fetch(url, {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = await r.json();
-      console.log("🔎 Activity raw data:", data);
-      const list = Array.isArray(data)
-        ? data
-        : data.data || data.activity || data.items || [];
-      return (list || []).map(normalize);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      try {
+        const r = await fetch(url, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        console.log("🔎 Activity raw data:", data);
+        const list = Array.isArray(data)
+          ? data
+          : data.data || data.activity || data.items || [];
+        return (list || []).map(normalize);
+      } finally {
+        clearTimeout(timeoutId);
+      }
     }
 
     // 1) Same-origin first with lead_id, then id
@@ -1619,9 +1655,11 @@ async function updateLeadOnAPI(id, payload) {
         );
       }
       if (list.length) {
-        activityCache.set(String(leadId), list);
+        activityCache.set(activityKey, list);
         return list;
       }
+      activityCache.set(activityKey, []);
+      return [];
     } catch (err) {
       console.warn("Same-origin activity fetch failed:", err.message);
     }
@@ -1636,20 +1674,28 @@ async function updateLeadOnAPI(id, payload) {
       `https://corsproxy.io/?${encodeURIComponent(t)}`,
       `https://api.allorigins.win/raw?url=${encodeURIComponent(t)}`,
     ];
-    for (const t of targets) {
+    for (let i = 0; i < targets.length; i += 1) {
+      const t = targets[i];
+      let gotResponseForTarget = false;
       for (const url of proxies(t)) {
         try {
           const list = await tryFetch(url);
+          gotResponseForTarget = true;
           if (list.length) {
-            activityCache.set(String(leadId), list);
+            activityCache.set(activityKey, list);
             return list;
           }
+          break;
         } catch (e) {
           console.warn("Activity proxy failed:", url, e.message);
         }
       }
+      if (gotResponseForTarget && i === targets.length - 1) {
+        activityCache.set(activityKey, []);
+        return [];
+      }
     }
-    return activityCache.get(String(leadId)) || [];
+    return activityCache.get(activityKey) || [];
   }
 
   // ─────────────────────────────────────────────
@@ -1679,6 +1725,11 @@ async function updateLeadOnAPI(id, payload) {
         (lead) => lead.bearbeiter === currentBearbeiter,
       );
     }
+    if (currentDelegieren) {
+      filtered = filtered.filter(
+        (lead) => lead.delegieren === currentDelegieren,
+      );
+    }
 
     return filtered;
   }
@@ -1691,7 +1742,7 @@ async function updateLeadOnAPI(id, payload) {
 
     const tbody = document.getElementById("leads-tbody");
     if (tbody && fullLeadsData.length === 0) {
-      tbody.innerHTML = `<td colspan="15"><div class="empty-state loading-state">⏳ Lade Daten...</div>`;
+      tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state loading-state">⏳ Lade Daten...</div></td></tr>`;
     }
 
     try {
@@ -1734,7 +1785,7 @@ async function updateLeadOnAPI(id, payload) {
     if (!tbody) return;
 
     if (!data.length) {
-      tbody.innerHTML = `<td colspan="15"><div class="empty-state">Keine Leads gefunden.</div>`;
+      tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state">Keine Leads gefunden.</div></td></tr>`;
       updateSelectedCount();
       return;
     }
@@ -1757,28 +1808,21 @@ async function updateLeadOnAPI(id, payload) {
         <td><span class="tag">${escapeHtml(lead.quelle)}</span></td>
         <td><span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span></td>
         <td><span class="tag">${escapeHtml(lead.kategorie || "—")}</span></td>
-        <td><div style="width:32px;height:32px;border-radius:50%;background:#f0f0f0;"></div></td>
+        <td><div class="delegate-dot" >${escapeHtml(lead.delegieren || "—")}</div></td>
+        
         <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
         <td><span class="date-cell">${escapeHtml(lead.datum)}</span></td>
-        <td>
-          <button class="act-btn call-btn" data-lead-id="${lead.id}" title="Anrufen">
-            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.08 5.18 2 2 0 0 1 5.06 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.09 10.91A16 16 0 0 0 13.09 15l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16z"/></svg>
-          </button>
-        </td>
-        <td>
-          <button class="act-btn" onclick="window.sendEmailLead(${lead.id})">
-            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          </button>
-        </td>
-        <tr>
-          <td>
-          <button class="act-btn" onclick="window.openNotesLead(${lead.id})">
-            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          </button>
-
-         </td>
-         <td>
+        <td class="actions-cell">
           <div class="actions">
+            <button class="act-btn call-btn" data-lead-id="${lead.id}" title="Anrufen">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.08 5.18 2 2 0 0 1 5.06 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.09 10.91A16 16 0 0 0 13.09 15l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16z"/></svg>
+            </button>
+            <button class="act-btn" onclick="window.sendEmailLead(${lead.id})" title="E-Mail senden">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            </button>
+            <button class="act-btn" onclick="window.openNotesLead(${lead.id})" title="Notizen">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </button>
             <button class="act-btn" onclick="window.editLead(${lead.id})" title="Bearbeiten">
               <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             </button>
@@ -1786,7 +1830,7 @@ async function updateLeadOnAPI(id, payload) {
               <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </div>
-         </td>
+        </td>
       `;
       tbody.appendChild(tr);
 
@@ -1794,7 +1838,7 @@ async function updateLeadOnAPI(id, payload) {
       const xtr = document.createElement("tr");
       xtr.className = `expand-row ${expandedRows.has(lead.id) ? "open" : ""}`;
       xtr.innerHTML = `
-        <td colspan="15">
+        <td colspan="12">
           <div class="expand-grid">
             <div class="expand-item"><label>Dachfläche</label><span>${escapeHtml(lead.dachflaeche || "—")}</span></div>
             <div class="expand-item"><label>Dacheindeckung</label><span>${escapeHtml(lead.dacheindeckung || "—")}</span></div>
@@ -2063,7 +2107,8 @@ async function updateLeadOnAPI(id, payload) {
     currentQuelle = document.getElementById("filter-quelle")?.value || "";
     currentBearbeiter =
       document.getElementById("filter-bearbeiter")?.value || ""; // Add this line
-      document.getElementById("filter-delegieren")?.value || ""; // Add this line
+     currentDelegieren =
+    document.getElementById("filter-delegieren")?.value || "";  // Make sure this matches HTML id
     currentPage = 1;
     loadPage(1);
   }
@@ -2141,7 +2186,14 @@ async function updateLeadOnAPI(id, payload) {
     setFieldValue("editId", String(lead.id || ""));
     setFieldValue("editSalutation", lead.salutation || "");
     setFieldValue("editName", lead.name);
-    setFieldValue("editBriefberatungTelefon", lead.briefberatungTelefon || "");
+     // FIX: Briefberatung Telefon - convert "Ja"/"Nein" back to original values
+  let briefberatungValue = "";
+  if (lead.briefberatungTelefon === "Ja") {
+    briefberatungValue = "Nein"; // Because in HTML, Nein = WAHR
+  } else if (lead.briefberatungTelefon === "Nein") {
+    briefberatungValue = "Ja"; // Because in HTML, Ja = FALSCH
+  }
+    setFieldValue("editBriefberatungTelefon", briefberatungValue);
     setFieldValue("editStrasseObjekt", lead.strasseObjekt || "");
     setFieldValue("editAngebot", lead.angebot || "");
     setFieldValue("editPlz", lead.plz || "");
@@ -2155,6 +2207,7 @@ async function updateLeadOnAPI(id, payload) {
     setFieldValue("editDatum", lead.datum !== "—" ? lead.datum : "");
     setFieldValue("editNachfassen", lead.nachfassen || "");
     setFieldValue("editBearbeiter", lead.bearbeiter);
+    setFieldValue("editDelegieren", lead.delegieren || "");  // ADD THIS LINE
     setFieldValue(
       "editSumme",
       lead.summe
@@ -2204,6 +2257,8 @@ async function updateLeadOnAPI(id, payload) {
     document.getElementById("viewTabRoof").innerHTML = `
       <div class="view-detail-row"><div class="view-detail-label">Dachfläche (m²)</div><div class="view-detail-value">${escapeHtml(lead.dachflaeche || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Dacheindeckung</div><div class="view-detail-value">${escapeHtml(lead.dacheindeckung || "—")}</div></div>
+       <div class="view-detail-row"><div class="view-detail-label">Erstberatung Telefon / Briefberatung Telefon</div><div class="view-detail-value">${escapeHtml(lead.briefberatungTelefon || "—")}</div></div>
+
       <div class="view-detail-row"><div class="view-detail-label">Baujahr Dach</div><div class="view-detail-value">${escapeHtml(lead.baujahr || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Dachpfanne</div><div class="view-detail-value">${escapeHtml(lead.dachpfanne || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Wunsch Farbe</div><div class="view-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
@@ -2238,12 +2293,21 @@ async function updateLeadOnAPI(id, payload) {
     if (activityEl) {
       activityEl.innerHTML =
         '<div class="empty-state loading-state">⏳ Lade Aktivitäten…</div>';
+      let activitySettled = false;
+      const activityFallbackTimer = setTimeout(() => {
+        if (activitySettled) return;
+        if (String(currentViewLeadId) !== String(id)) return;
+        activityEl.innerHTML =
+          '<div class="empty-state">Keine Aktivitäten gefunden.</div>';
+      }, 2200);
       fetchActivityForLead(id)
         .then((list) => {
+          activitySettled = true;
+          clearTimeout(activityFallbackTimer);
           if (String(currentViewLeadId) !== String(id)) return;
           if (!list.length) {
             activityEl.innerHTML =
-              '<div class="empty-state">Keine Aktivitäten vorhanden.</div>';
+              '<div class="empty-state">Keine Aktivitäten gefunden.</div>';
             return;
           }
           const cards = list
@@ -2262,6 +2326,8 @@ async function updateLeadOnAPI(id, payload) {
           activityEl.innerHTML = `<div class="activity-wrap">${cards}</div>`;
         })
         .catch(() => {
+          activitySettled = true;
+          clearTimeout(activityFallbackTimer);
           if (String(currentViewLeadId) !== String(id)) return;
           activityEl.innerHTML =
             '<div class="empty-state">Aktivitäten konnten nicht geladen werden.</div>';
@@ -2376,18 +2442,32 @@ async function updateLeadOnAPI(id, payload) {
     const subject = encodeURIComponent("Project Update");
     const body = encodeURIComponent("Hi,\n\nHere is the update.\n\nRegards,");
     const composeUrl = `https://hex2013.com/owa/?path=/mail/action/compose&to=${to}&subject=${subject}&body=${body}`;
+    const composeWindow = window.open(composeUrl, "_blank");
+    if (!composeWindow) {
+      showToast("E-Mail-Fenster konnte nicht geöffnet werden", "error", 2600);
+      return;
+    }
+
+    const actor = resolveActivityActor(lead.bearbeiter);
+    const activityText = `${actor} öffnete E-Mail an ${email}`;
+    addOptimisticActivity(id, {
+      text: activityText,
+      by: actor,
+      at: new Date().toLocaleString(),
+    });
 
     try {
-      const activityText = `E-Mail geöffnet zu ${leadName} (${email})`;
-      await insertActivity(id, "email", activityText);
+      await insertActivity(id, "email", activityText, {
+        from: actor,
+        email,
+        leadName,
+      });
     } catch (e) {
       console.warn(
         "E-Mail Aktivität konnte nicht gespeichert werden:",
         e?.message || e,
       );
     }
-
-    window.open(composeUrl, "_blank");
   };
 
   // Safely read an input/select value by id; returns empty string if missing
@@ -2414,6 +2494,7 @@ async function updateLeadOnAPI(id, payload) {
       datum: val("editDatum"),
       nachfassen: val("editNachfassen"),
       bearbeiter: val("editBearbeiter"),
+    delegieren: val("editDelegieren"),  // Make sure this line exists
       summe: val("editSumme"),
       dachflaeche: val("editDachflaeche"),
       dachneigung: val("editDachneigung"),
@@ -2524,6 +2605,11 @@ async function updateLeadOnAPI(id, payload) {
     // filter-bearbeiter
     document
       .getElementById("filter-bearbeiter")
+      ?.addEventListener("change", applyFilters);
+    
+      // filter-delegieren
+    document
+      .getElementById("filter-delegieren")
       ?.addEventListener("change", applyFilters);
 
     // Rows per page change listener
@@ -2726,11 +2812,15 @@ if (currentEditId) {
       ?.addEventListener("click", () =>
         document.getElementById("massEmailModal").classList.remove("active"),
       );
-    document.getElementById("massEmailModal")?.addEventListener("click", (e) => {
-      if (e.target === document.getElementById("massEmailModal"))
-        document.getElementById("massEmailModal").classList.remove("active");
-    });
-    document.getElementById("sendMassEmailBtn")?.addEventListener("click", sendMassEmails);
+    document
+      .getElementById("massEmailModal")
+      ?.addEventListener("click", (e) => {
+        if (e.target === document.getElementById("massEmailModal"))
+          document.getElementById("massEmailModal").classList.remove("active");
+      });
+    document
+      .getElementById("sendMassEmailBtn")
+      ?.addEventListener("click", sendMassEmails);
   }
 
   return { init };
@@ -2738,4 +2828,3 @@ if (currentEditId) {
 
 window.leadsPage = leadsPage;
 console.log("leads.js loaded - window.leadsPage exists:", !!window.leadsPage);
-

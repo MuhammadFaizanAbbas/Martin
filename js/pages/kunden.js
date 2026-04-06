@@ -4,6 +4,9 @@ const kundenPage = (function () {
   let fullLeadsData = [];
   let notesCache = new Map();
   let activityCache = new Map();
+  const PENDING_KUNDEN_UPDATES_KEY = "kunden-pending-updates-v1";
+  const KUNDEN_LEADS_CACHE_KEY = "kunden-leads-cache-v1";
+  const KUNDEN_DASHBOARD_CACHE_KEY = "kunden-dashboard-cache-v1";
 
   // ── API URLs ──────────────────────────────────────────────────────────────
   const SO_LEADS = "/api/leads";
@@ -12,6 +15,14 @@ const kundenPage = (function () {
   const REMOTE_DASHBOARD_URL = "https://goarrow.ai/test/dashboard.php";
   const ACTIVITY_FETCH_SAME = "/api/lead_activity";
   const NOTES_FETCH_SAME = "/api/lead_notes";
+  const UPDATE_API_DIRECT = "https://goarrow.ai/test/update_lead.php";
+  const UPDATE_API_SAME = "/api/update_lead";
+  const UPDATE_API_PROXY = `https://corsproxy.io/?${encodeURIComponent(UPDATE_API_DIRECT)}`;
+  const UPDATE_API_ALT_PROXY = `https://api.allorigins.win/raw?url=${encodeURIComponent(UPDATE_API_DIRECT)}`;
+
+  // Add these lines near other API URLs (around line 20-30)
+const INSERT_ACTIVITY_API = "/api/insert_activity";
+const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
 
   const PROXY_LEADS_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_LEADS_URL)}`;
   const PROXY_DASHBOARD_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_DASHBOARD_URL)}`;
@@ -19,6 +30,100 @@ const kundenPage = (function () {
   const ALT_PROXY_DASHBOARD_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(REMOTE_DASHBOARD_URL)}`;
 
   // ── State ──────────────────────────────────────────────────────────────────
+  function shouldTrySameOriginApi() {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+    const isStaticDevHost =
+      (hostname === "127.0.0.1" || hostname === "localhost") &&
+      /^55\d{2}$/.test(port || "");
+
+    return !isStaticDevHost;
+  }
+
+  function getCorsSafeEndpoints(sameOriginUrl, proxyUrl, altProxyUrl) {
+    const endpoints = [];
+    if (shouldTrySameOriginApi() && sameOriginUrl) {
+      endpoints.push({ url: sameOriginUrl, delay: 0 });
+    }
+    if (proxyUrl) endpoints.push({ url: proxyUrl, delay: 0 });
+    if (altProxyUrl) endpoints.push({ url: altProxyUrl, delay: 350 });
+    return endpoints;
+  }
+
+  function getResilientFetchEndpoints(sameOriginUrl, targetUrl) {
+    const endpoints = [];
+    if (shouldTrySameOriginApi() && sameOriginUrl) {
+      endpoints.push({ url: `${sameOriginUrl}?_ts=${Date.now()}`, delay: 0 });
+    }
+
+    const proxyTargets = [
+      `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+    ];
+
+    proxyTargets.forEach((url, index) => {
+      endpoints.push({ url, delay: index * 350 });
+    });
+
+    return endpoints;
+  }
+
+  function saveJsonCache(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify({ value, savedAt: Date.now() }));
+    } catch {}
+  }
+
+  function loadJsonCache(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.value ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  function loadPendingUpdates() {
+    try {
+      const raw = localStorage.getItem(PENDING_KUNDEN_UPDATES_KEY);
+      if (!raw) return new Map();
+      return new Map(Object.entries(JSON.parse(raw) || {}));
+    } catch {
+      return new Map();
+    }
+  }
+
+  function persistPendingUpdates() {
+    try {
+      localStorage.setItem(
+        PENDING_KUNDEN_UPDATES_KEY,
+        JSON.stringify(Object.fromEntries(pendingUpdates)),
+      );
+    } catch {}
+  }
+
+  function queuePendingUpdate(id, patch) {
+    const key = String(id);
+    pendingUpdates.set(key, {
+      ...(pendingUpdates.get(key) || {}),
+      ...patch,
+      _updatedAt: Date.now(),
+    });
+    persistPendingUpdates();
+  }
+
+  function applyPendingUpdates(list) {
+    return list.map((lead) => {
+      const pending = pendingUpdates.get(String(lead.id));
+      if (!pending) return lead;
+      const merged = { ...lead, ...pending };
+      if (merged.status) merged.statusClass = getStatusClass(merged.status);
+      return merged;
+    });
+  }
+
   let leadsData = [];
   let dashboardStats = {};
   let expandedRows = new Set();
@@ -27,14 +132,17 @@ const kundenPage = (function () {
   let kundenActiveFilter = "offen";
   let filteredData = [];
   let isLoading = false;
+  let pendingUpdates = loadPendingUpdates();
   
   // New filter states
   let statusFilter = "";
   let leadSourceFilter = "";
   let ortSearchTerm = "";
+  let bearbeiterFilter = "";
+  let delegierenFilter = "";  // Add this line
 
   // Store teleconsultation selections for each lead
-  let teleconsultationSelections = new Map(); // key: leadId, value: 'true' or 'false'
+  let teleconsultationSelections = new Map();
 
   const STATUS_MAPPING = {
     Offen: "Offen",
@@ -53,14 +161,603 @@ const kundenPage = (function () {
     Storniert: "Storniert",
   };
 
-  // Status options for edit modal
+  // Status options for edit modal - comprehensive list
   const EDIT_STATUS_OPTIONS = [
-    "in Bearbeitung",
+    "follow up",
     "Offen",
-    "Nur Info eingeholt",
-    "falscher Kunde"
+    "In Bearbeitung",
+    "Infos eingeholt",
+    "Beauftragung",
+    "Beauftragt",
+    "EA beauftragt",
+    "NT beauftragt",
+    "In Bearbeitung - Angebot",
+    "In Bearbeitung - Preischätzung",
+    "Abgesagt",
+    "1x gesagt tot",
+    "Falscher Kunde",
+    "Storno",
+    "Ghoster"
   ];
 
+  // Quelle options
+  const QUELLE_OPTIONS = [
+    "Google", "Facebook", "ChatGPT", "Instagram", "kleinanzeigen",
+    "Empfehlung", "Newsletter", "Bestandskunde", "MA Baustelle",
+    "Empfehlungskarte", "Aussendienst", "Platzhalter", "Buswerbung",
+    "Autowerbung", "bing", "Flyer", "Solar"
+  ];
+
+  // Bearbeiter options
+  const BEARBEITER_OPTIONS = ["Philipp", "André", "Martin", "Simon"];
+
+  // Dacheindeckung options
+  const DACHEINDECKUNG_OPTIONS = [
+    "Beton", "Ton", "Metall", "Eternit", "Engobe", "Glasiert", "Asbest", "Echt Schiefer", "Tegalit"
+  ];
+
+  // Farbe options
+  const FARBE_OPTIONS = [
+    "Anthrazit", "Rot", "Schwarz", "Grau", "Ziegelrot", "Blauschwarz",
+    "Schiefergrau", "Stahlblau", "Bordeaux", "Moosgrün", "Oxidrot", "Klassikrot"
+  ];
+
+  // Dachpfanne options
+  const DACHPFANNE_OPTIONS = [
+    "Frankfurter Pfanne", "Harzer Pfanne", "Doppel-S Pfanne", "Taunus Pfanne",
+    "Hohlpfanne", "Doppelmuldenziegel", "Biberschwanz", "Tegalit", "Sonstige", "Unbekannt"
+  ];
+
+  // Dachneigung options
+  const DACHNEIGUNG_OPTIONS = [
+    "0-15°", "15-25°", "25-45°", "45-55°", "über 55 Grad"
+  ];
+
+  // ─────────────────────────────────────────────
+  // TOASTS (lightweight, no dependency)
+  // ─────────────────────────────────────────────
+  function addToastStyles() {
+    if (document.getElementById("toast-styles")) return;
+    const s = document.createElement("style");
+    s.id = "toast-styles";
+    s.textContent = `
+      .toast-container { position: fixed; top: 16px; right: 16px; z-index: 999999; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+      .toast { min-width: 280px; max-width: 380px; padding: 12px 14px; border-radius: 10px; color: #0f172a; background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 10px 30px rgba(0,0,0,0.08); font-size: 0.9rem; display: grid; grid-template-columns: 6px 1fr auto; align-items: center; gap: 12px; opacity: 0; transform: translateX(16px); animation: toastIn 200ms ease forwards; pointer-events: auto; position: relative; overflow: hidden; }
+      .toast .toast-accent { width: 6px; height: 100%; border-radius: 6px; }
+      .toast .toast-close { background: transparent; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 4px; border-radius: 6px; }
+      .toast .toast-close:hover { background: #f1f5f9; color: #475569; }
+      .toast .toast-progress { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: rgba(0,0,0,0.06); }
+      .toast .toast-progress > div { height: 100%; width: 100%; transform-origin: left center; background: #3b82f6; }
+      .toast-success { border-color: #bbf7d0; }
+      .toast-success .toast-accent { background: #22c55e; }
+      .toast-success .toast-progress > div { background: #22c55e; }
+      .toast-error { border-color: #fecaca; }
+      .toast-error .toast-accent { background: #ef4444; }
+      .toast-error .toast-progress > div { background: #ef4444; }
+      .toast-info { border-color: #c7d2fe; }
+      .toast-info .toast-accent { background: #3b82f6; }
+      .toast-info .toast-progress > div { background: #3b82f6; }
+      @keyframes toastIn { to { opacity: 1; transform: translateX(0); } }
+      @keyframes toastOut { to { opacity: 0; transform: translateX(16px); } }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function ensureToastContainer() {
+    let c = document.getElementById("toast-container");
+    if (!c) {
+      c = document.createElement("div");
+      c.id = "toast-container";
+      c.className = "toast-container";
+      document.body.appendChild(c);
+    }
+    return c;
+  }
+
+  function showToast(message, type = "success", duration = 2500) {
+    addToastStyles();
+    const container = ensureToastContainer();
+    const el = document.createElement("div");
+    el.className = `toast toast-${type}`;
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
+    const accent = document.createElement("div");
+    accent.className = "toast-accent";
+    const content = document.createElement("div");
+    content.textContent = message;
+    const close = document.createElement("button");
+    close.className = "toast-close";
+    close.setAttribute("aria-label", "Schließen");
+    close.textContent = "×";
+    const progress = document.createElement("div");
+    progress.className = "toast-progress";
+    const bar = document.createElement("div");
+    progress.appendChild(bar);
+    el.appendChild(accent);
+    el.appendChild(content);
+    el.appendChild(close);
+    el.appendChild(progress);
+    container.appendChild(el);
+
+    let start = performance.now();
+    let stopped = false;
+    const tick = (t) => {
+      const elapsed = t - start;
+      const pct = Math.max(0, 1 - elapsed / duration);
+      bar.style.transform = `scaleX(${pct})`;
+      if (!stopped && elapsed < duration) {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        hide();
+      }
+    };
+    const hide = () => {
+      stopped = true;
+      el.style.animation = "toastOut 180ms ease forwards";
+      setTimeout(() => el.remove(), 200);
+    };
+    let rafId = requestAnimationFrame(tick);
+    close.addEventListener("click", hide);
+    el.addEventListener("mouseenter", () => {
+      stopped = true;
+    });
+    el.addEventListener("mouseleave", () => {
+      if (bar.style.transform) {
+        start =
+          performance.now() -
+          duration *
+            (1 - parseFloat(bar.style.transform.replace("scaleX(", "")));
+        stopped = false;
+        rafId = requestAnimationFrame(tick);
+      }
+    });
+    return { hide };
+  }
+
+  function isStaticLocalHost() {
+    return (
+      typeof location !== "undefined" &&
+      (location.protocol === "file:" ||
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || ""))
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // UPDATE LEAD API (from leads page)
+  // ─────────────────────────────────────────────
+  function friendlyApiError(prefix, details = "") {
+    const message = String(details || "").trim();
+    return message ? `${prefix}: ${message}` : prefix;
+  }
+
+  function normalizeUpdateResponse(data, rawText = "") {
+    const raw = String(rawText || "").trim();
+    if (
+      data === 0 ||
+      data?.status === 0 ||
+      raw === "0" ||
+      data === false ||
+      data == null ||
+      data?.success === false ||
+      data?.status === false ||
+      String(data?.status || "").toLowerCase() === "error" ||
+      raw.toLowerCase() === "false"
+    ) {
+      throw new Error(data?.message || data?.error || raw || "Backend returned false");
+    }
+    return data;
+  }
+
+  function buildLeadUpdatePayload(lead, overrides = {}) {
+    const leadId = String(overrides.id ?? overrides.lead_id ?? lead?.id ?? "").trim();
+    const normalizedErstberatung = normalizeErstberatungValue(
+      overrides.erstberatung_telefon ?? lead?.erstberatung_telefon ?? "",
+    );
+    return {
+      id: leadId,
+      lead_id: leadId,
+      status: overrides.status ?? lead?.status ?? "",
+      sale_typ: overrides.sale_typ ?? overrides.salesTyp ?? lead?.salesTyp ?? "",
+      bearbeiter: overrides.bearbeiter ?? lead?.bearbeiter ?? "",
+      name: overrides.name ?? lead?.name ?? "",
+      salutation: overrides.salutation ?? lead?.salutation ?? "",
+      erstberatung_telefon: normalizedErstberatung,
+      erstberatungTelefon: normalizedErstberatung,
+      briefberatung_telefon: normalizedErstberatung,
+      briefberatungTelefon: normalizedErstberatung,
+      strasse_objekt: overrides.strasse_objekt ?? lead?.strasse ?? "",
+      angebot: overrides.angebot ?? lead?.angebot ?? "",
+      plz: overrides.plz ?? lead?.plz ?? "",
+      ort: overrides.ort ?? lead?.ort ?? "",
+      telefon: overrides.telefon ?? lead?.telefon ?? "",
+      email: overrides.email ?? lead?.email ?? "",
+      einschaetzung_kunde:
+        overrides.einschaetzung_kunde ?? overrides.qualification ?? lead?.qualification ?? "",
+      lead_quelle: overrides.lead_quelle ?? overrides.quelle ?? lead?.quelle ?? "",
+      kontakt_via: overrides.kontakt_via ?? overrides.kontaktVia ?? lead?.kontaktVia ?? "",
+      datum: overrides.datum ?? lead?.datum ?? "",
+      nachfassen: overrides.nachfassen ?? lead?.nachfassen ?? "",
+      summe_netto:
+        overrides.summe_netto ??
+        (lead?.summe ? String(lead.summe).replace(/^\$\s*/, "").trim() : ""),
+      dachflaeche_m2: overrides.dachflaeche_m2 ?? lead?.dachflaeche ?? "",
+      dachneigung_grad: overrides.dachneigung_grad ?? lead?.dachneigung ?? "",
+      dacheindeckung: overrides.dacheindeckung ?? lead?.dacheindeckung ?? "",
+      wunsch_farbe: overrides.wunsch_farbe ?? lead?.farbe ?? "",
+      dachpfanne: overrides.dachpfanne ?? lead?.dachpfanne ?? "",
+      baujahr_dach: overrides.baujahr_dach ?? lead?.dachalter ?? "",
+      zusaetzliche_extras: overrides.zusaetzliche_extras ?? lead?.zusatzExtras ?? "",
+      delegieren: overrides.delegieren ?? lead?.delegieren ?? "",
+    };
+  }
+
+  async function updateLeadOnAPI(id, payload) {
+    const leadId = String(id ?? payload?.lead_id ?? payload?.id ?? "").trim();
+    if (!leadId || leadId === "null" || leadId === "undefined") {
+      throw new Error("Lead ID fehlt");
+    }
+
+    const normalizeDate = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw || raw === "—" || raw === "0000-00-00") return "";
+      const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+      return match ? match[1] : raw;
+    };
+
+    const normalizedErstberatung = normalizeErstberatungValue(payload.erstberatung_telefon || "");
+
+    const mappedPayload = {
+      id: leadId,
+      lead_id: leadId,
+      status: payload.status || "",
+      sale_typ: payload.sale_typ || "",
+      bearbeiter: payload.bearbeiter || "",
+      name: payload.name || "",
+      salutation: payload.salutation || "",
+      erstberatung_telefon: normalizedErstberatung,
+      erstberatungTelefon: normalizedErstberatung,
+      briefberatung_telefon: normalizedErstberatung,
+      briefberatungTelefon: normalizedErstberatung,
+      strasse_objekt: payload.strasse_objekt || "",
+      angebot: payload.angebot || "",
+      plz: payload.plz || "",
+      ort: payload.ort || "",
+      telefon: payload.telefon || "",
+      email: payload.email || "",
+      einschaetzung_kunde: payload.einschaetzung_kunde || "",
+      lead_quelle: payload.lead_quelle || "",
+      kontakt_via: payload.kontakt_via || payload.kontaktVia || "",
+      datum: normalizeDate(payload.datum),
+      nachfassen: normalizeDate(payload.nachfassen),
+      summe_netto: payload.summe_netto || "",
+      dachflaeche_m2: payload.dachflaeche_m2 || "",
+      dachneigung_grad: payload.dachneigung_grad || "",
+      dacheindeckung: payload.dacheindeckung || "",
+      wunsch_farbe: payload.wunsch_farbe || "",
+      dachpfanne: payload.dachpfanne || "",
+      baujahr_dach: payload.baujahr_dach || "",
+      zusaetzliche_extras: payload.zusaetzliche_extras || "",
+      delegieren: payload.delegieren || "",
+    };
+
+    Object.keys(mappedPayload).forEach((key) => {
+      if (mappedPayload[key] === undefined || mappedPayload[key] === null) {
+        delete mappedPayload[key];
+      }
+    });
+
+    const formData = new URLSearchParams();
+    Object.entries(mappedPayload).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        formData.append(key, String(value));
+      }
+    });
+
+    console.log("Update payload preview:", mappedPayload);
+    console.log("Update payload form data:", formData.toString());
+
+    try {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+
+      const response = await fetch(UPDATE_API_SAME, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(mappedPayload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { status: "success", raw: text };
+      }
+
+      const normalized = normalizeUpdateResponse(data, text);
+      console.log("Update response (same-origin):", normalized);
+      return normalized;
+    } catch (error) {
+      console.warn("Same-origin update failed, trying proxy:", error.message);
+    }
+
+    const proxyEndpoints = [UPDATE_API_PROXY, UPDATE_API_ALT_PROXY];
+    for (const endpoint of proxyEndpoints) {
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: formData.toString(),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        const text = await response.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { status: "success", raw: text };
+        }
+
+        const normalized = normalizeUpdateResponse(data, text);
+        console.log("Update response (proxy):", normalized);
+        return normalized;
+      } catch (error) {
+        console.warn("Update proxy failed:", endpoint, error.message);
+      }
+    }
+
+    throw new Error(
+      friendlyApiError("Update fehlgeschlagen", "Kein erreichbarer Update-Endpunkt verfügbar"),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // ACTIVITY API (from leads page)
+  // ─────────────────────────────────────────────
+  function isInvalidActivityActor(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return (
+      !normalized ||
+      normalized === "???" ||
+      normalized === "?" ||
+      normalized === "created_by" ||
+      normalized === "system" ||
+      normalized === "null" ||
+      normalized === "undefined"
+    );
+  }
+
+  function resolveActivityActor(preferred = "") {
+    const candidates = [preferred, bearbeiterFilter];
+    for (const value of candidates) {
+      const normalized = String(value || "").trim();
+      if (!isInvalidActivityActor(normalized)) return normalized;
+    }
+    return "";
+  }
+
+  function resolveActivityActorForLead(leadId, preferred = "") {
+    const key = String(leadId);
+    const lead = leadsData.find((l) => String(l.id) === key);
+    const pending = pendingUpdates.get(key) || {};
+    const candidates = [
+      preferred,
+      pending.bearbeiter,
+      lead?.bearbeiter,
+      pending.delegieren,
+      lead?.delegieren,
+      bearbeiterFilter,
+    ];
+
+    for (const value of candidates) {
+      const actor = resolveActivityActor(value);
+      if (actor) return actor;
+    }
+
+    return "Bearbeiter unbekannt";
+  }
+
+  function rewriteActivityTextActor(text, actor) {
+    const safeText = String(text || "").trim();
+    const safeActor = resolveActivityActor(actor) || "Bearbeiter unbekannt";
+    if (!safeText) return safeText;
+    return safeText
+      .replace(/^created_by\b/i, safeActor)
+      .replace(/^system\b/i, safeActor);
+  }
+
+  function syncEditPermissionState(leadId, enabled) {
+    const key = String(leadId);
+    if (enabled) checkedEdit.add(key);
+    else checkedEdit.delete(key);
+
+    const editCheckbox = document.querySelector(`.edit-cb[data-id="${leadId}"]`);
+    if (editCheckbox) editCheckbox.checked = !!enabled;
+
+    const editBtn =
+      editCheckbox?.parentElement?.querySelector(".edit-icon-btn") ||
+      document.querySelector(`.edit-cb[data-id="${leadId}"]`)?.parentElement?.querySelector(".edit-icon-btn");
+    if (editBtn) editBtn.disabled = !enabled;
+  }
+
+  function normalizeErstberatungValue(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) return "";
+    if (normalized === "wahr" || normalized === "true" || normalized === "1") {
+      return "WAHR";
+    }
+    if (normalized === "falsch" || normalized === "false" || normalized === "0") {
+      return "FALSCH";
+    }
+    return String(value || "").trim();
+  }
+
+  function getTeleconsultationSelection(leadId) {
+    const key = String(leadId);
+    const cached = teleconsultationSelections.get(key);
+    if (cached === "true" || cached === "false") return cached;
+
+    const lead = leadsData.find((item) => String(item.id) === key);
+    const current = normalizeErstberatungValue(lead?.erstberatung_telefon);
+    if (current === "WAHR") return "true";
+    if (current === "FALSCH") return "false";
+    return "";
+  }
+
+  function isErstberatungChecked(lead) {
+    return getTeleconsultationSelection(lead?.id) === "true";
+  }
+
+async function insertActivity(leadId, activityType, activityText, meta = {}) {
+  const actor = resolveActivityActorForLead(
+    leadId,
+    meta.bearbeiter || meta.from || meta.user || meta.author,
+  );
+  const normalizedText = rewriteActivityTextActor(activityText, actor);
+
+  const payload = {
+    lead_id: leadId,
+    from: actor,
+    description: normalizedText,
+    activity_type: activityType,
+    activity_text: normalizedText,
+    action: activityType,
+    user: actor,
+    created_by: actor,
+    phone: meta.phone || "",
+    email: meta.email || "",
+    lead_name: meta.leadName || "",
+    timestamp: new Date().toISOString(),
+  };
+
+  console.log("Activity insert payload:", payload);
+
+  const params = new URLSearchParams();
+  Object.entries(payload).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) params.append(k, String(v));
+  });
+
+  try {
+    if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+    const res = await fetch(INSERT_ACTIVITY_API, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data && (data.status === "success" || data.success === true)) {
+      return data;
+    }
+    return data;
+  } catch (err) {
+    if (isStaticLocalHost()) {
+      console.info("Skipping same-origin activity insert on static localhost; using proxy");
+    } else {
+      console.warn("Activity insert via same-origin failed, trying proxy...", err.message);
+    }
+
+    try {
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_ACTIVITY_DIRECT)}`;
+      const res = await fetch(proxyUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { status: "success", raw: text };
+      }
+    } catch (proxyErr) {
+      console.error("Activity insert failed:", proxyErr);
+      throw new Error(`Aktivit??t konnte nicht gespeichert werden: ${proxyErr.message}`);
+    }
+  }
+}
+
+  function addOptimisticActivity(leadId, activity) {
+    const key = String(leadId);
+    const existing = activityCache.get(key) || [];
+    const merged = [activity, ...existing];
+    activityCache.set(key, merged);
+  }
+
+  // ─────────────────────────────────────────────
+  // NOTES API (from leads page)
+  // ─────────────────────────────────────────────
+  const INSERT_NOTE_DIRECT = "https://goarrow.ai/test/insert_lead_note.php";
+  const NOTES_INSERT_SAME = "/api/insert_lead_note";
+
+  async function createNoteForLead(leadId, text) {
+    const body = { lead_id: leadId, note: text, text };
+    const params = new URLSearchParams();
+    Object.entries(body).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
+    try {
+      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+      const res = await fetch(NOTES_INSERT_SAME, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      try {
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_NOTE_DIRECT)}`;
+        const res = await fetch(proxyUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const textResp = await res.text();
+        try {
+          return JSON.parse(textResp);
+        } catch {
+          return { status: "success", raw: textResp };
+        }
+      } catch (proxyErr) {
+        throw new Error(`Notiz konnte nicht gespeichert werden: ${proxyErr.message}`);
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // EXISTING FUNCTIONS
+  // ─────────────────────────────────────────────
   function httpGetJson(url, controller) {
     return fetch(url, {
       method: "GET",
@@ -101,69 +798,75 @@ const kundenPage = (function () {
     }
   }
 
+  function getRemoteJsonProxyUrls(targetUrl) {
+    return [`https://corsproxy.io/?${encodeURIComponent(targetUrl)}`];
+  }
+
   async function fetchNotesForLead(leadId) {
     if (notesCache.has(String(leadId))) {
       return notesCache.get(String(leadId));
     }
-    
-    try {
-      const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`, { 
-        headers: { Accept: 'application/json' } 
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const list = Array.isArray(data) ? data : (data.data || data.notes || []);
-      const normalized = (list || []).map(n => ({ 
-        text: String(n.text || n.note || n.message || ''), 
-        author: String(n.author || n.user || 'Created at'), 
-        date: String(n.date || n.created_at || '') 
+
+    const normalizeNotes = (data) => {
+      const list = Array.isArray(data) ? data : (data?.data || data?.notes || []);
+      return (list || []).map((n) => ({
+        text: String(n.text || n.note || n.message || ''),
+        author: String(n.author || n.user || 'Created at'),
+        date: String(n.date || n.created_at || ''),
       }));
-      notesCache.set(String(leadId), normalized);
-      return normalized;
-    } catch (err) {
-      console.warn('Same-origin notes fetch failed, trying proxies:', err.message);
+    };
+
+    if (shouldTrySameOriginApi()) {
+      try {
+        const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`, {
+          headers: { Accept: 'application/json' }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const normalized = normalizeNotes(await res.json());
+        notesCache.set(String(leadId), normalized);
+        return normalized;
+      } catch {}
     }
-    
+
     const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}`;
-    const proxies = [
-      `https://corsproxy.io/?${encodeURIComponent(target)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
-    ];
-    for (const url of proxies) {
+    for (const url of getRemoteJsonProxyUrls(target)) {
       try {
         const r = await fetch(url, { headers: { Accept: 'application/json' } });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        const list = Array.isArray(data) ? data : (data.data || data.notes || []);
-        const normalized = (list || []).map(n => ({ 
-          text: String(n.text || n.note || n.message || ''), 
-          author: String(n.author || n.user || 'System'), 
-          date: String(n.date || n.created_at || '') 
+        const normalized = normalizeNotes(await r.json()).map((n) => ({
+          ...n,
+          author: n.author || 'System',
         }));
         notesCache.set(String(leadId), normalized);
         return normalized;
-      } catch (e) {
-        console.warn('Notes proxy failed:', url, e.message);
-      }
+      } catch {}
     }
     return [];
   }
 
-  async function fetchActivityForLead(leadId) {
+async function fetchActivityForLead(leadId) {
     if (activityCache.has(String(leadId))) {
       return activityCache.get(String(leadId));
     }
     
     const normalize = (a) => {
-      const text = a.text || a.activity || a.action || a.event || a.message || a.desc || a.description || '';
-      const by = a.from || a.by || a.user || a.username || a.author || a.created_by || 'System';
+      let text = a.text || a.activity || a.action || a.event || a.message || a.desc || a.description || '';
+      let by = a.from || a.by || a.user || a.username || a.author || a.created_by || '';
+      if (isInvalidActivityActor(by)) {
+        by = resolveActivityActorForLead(leadId, by);
+      }
+      text = rewriteActivityTextActor(text, by);
       let at = a.at || a.datetime || a.timestamp || a.date_time || a.date || a.created_at || '';
       if (!at) {
         const d = a.activity_date || a.activityDate || a.date;
         const t = a.activity_time || a.activityTime || a.time;
         if (d || t) at = `${d || ''}${d && t ? ' ' : ''}${t || ''}`.trim();
       }
-      return { text: String(text || ''), by: String(by || 'System'), at: String(at || '') };
+      return {
+        text: String(text || ''),
+        by: String(by || 'Bearbeiter unbekannt'),
+        at: String(at || ''),
+      };
     };
 
     async function tryFetch(url) {
@@ -174,61 +877,91 @@ const kundenPage = (function () {
       return (list || []).map(normalize);
     }
 
-    try {
-      let list = await tryFetch(`${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`);
-      if (!list.length) {
-        list = await tryFetch(`${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`);
-      }
-      if (list.length) {
-        activityCache.set(String(leadId), list);
-        return list;
-      }
-    } catch (err) {
-      console.warn('Same-origin activity fetch failed:', err.message);
+    if (shouldTrySameOriginApi()) {
+      try {
+        let list = await tryFetch(`${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`);
+        if (!list.length) {
+          list = await tryFetch(`${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`);
+        }
+        if (list.length) {
+          activityCache.set(String(leadId), list);
+          return list;
+        }
+      } catch {}
     }
 
     const base = 'https://goarrow.ai/test/fetch_activity.php';
-    const targets = [
-      `${base}?lead_id=${encodeURIComponent(leadId)}`,
-      `${base}?id=${encodeURIComponent(leadId)}`,
-    ];
-    const proxies = (t) => [
-      `https://corsproxy.io/?${encodeURIComponent(t)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(t)}`,
-    ];
-    for (const t of targets) {
-      for (const url of proxies(t)) {
+    const targets = [`${base}?lead_id=${encodeURIComponent(leadId)}`];
+    for (const target of targets) {
+      for (const url of getRemoteJsonProxyUrls(target)) {
         try {
           const list = await tryFetch(url);
           if (list.length) {
             activityCache.set(String(leadId), list);
             return list;
           }
-        } catch (e) {
-          console.warn('Activity proxy failed:', url, e.message);
-        }
+        } catch {}
       }
     }
     return [];
-  }
+}
 
   async function fetchLeads() {
-    const result = await fetchFirstAvailable([
-      { url: SO_LEADS, delay: 0 },
-      { url: REMOTE_LEADS_URL, delay: 700 },
-      { url: PROXY_LEADS_URL, delay: 1100 },
-      { url: ALT_PROXY_LEADS_URL, delay: 1400 },
-    ]);
+    const result = await fetchFirstAvailable(
+      getResilientFetchEndpoints(SO_LEADS, REMOTE_LEADS_URL)
+    );
     if (!result.success || !result.data) {
+      const cached = loadJsonCache(KUNDEN_LEADS_CACHE_KEY);
+      if (cached) {
+        console.warn("Using cached leads data because all live endpoints failed.");
+        const rawCachedList = Array.isArray(cached)
+          ? cached
+          : (cached.data || cached.leads || cached.items || []);
+        return applyPendingUpdates((rawCachedList || []).map((apiLead) => ({
+          id: apiLead.id,
+          name: apiLead.name || "â€”",
+          salutation: apiLead.salutation || "",
+          ort: apiLead.ort || "â€”",
+          status: STATUS_MAPPING[apiLead.status] || apiLead.status || "Offen",
+          statusClass: getStatusClass(apiLead.status),
+          quelle: apiLead.lead_quelle || "â€”",
+          bearbeiter: apiLead.bearbeiter || "â€”",
+          summe: apiLead.summe_netto ? `$ ${formatNumber(apiLead.summe_netto)}` : "$ 0,00",
+          datum: apiLead.created_at ? apiLead.created_at.split(" ")[0] : apiLead.datum || "â€”",
+          dachflaeche: apiLead.dachflaeche_m2 || "",
+          dacheindeckung: apiLead.dacheindeckung || "",
+          dachalter: apiLead.baujahr_dach || "",
+          dachpfanne: apiLead.dachpfanne || "",
+          farbe: apiLead.wunsch_farbe || "",
+          dachneigung: apiLead.dachneigung_grad ? `${apiLead.dachneigung_grad}Â°` : "",
+          strasse: apiLead.strasse_objekt || "",
+          telefon: apiLead.telefon || "",
+          email: apiLead.email || "",
+          nachfassen: apiLead.nachfassen,
+// In fetchLeads function, already present - line ~1070
+          erstberatung_telefon: normalizeErstberatungValue(apiLead.erstberatung_telefon || ""),
+          delegieren: apiLead.delegieren || "—",
+          plz: apiLead.plz || "",
+          angebot: apiLead.angebot || "",
+          qualification: apiLead.einschaetzung_kunde || "",
+          kontaktVia: apiLead.kontakt_via || "",
+          zusatzExtras: apiLead.zusaetzliche_extras || "",
+          salesTyp: apiLead.sale_typ || "",
+          notes: [],
+          activities: [],
+        })));
+      }
       console.error("Failed to fetch leads:", result.error);
       return [];
     }
+
+    saveJsonCache(KUNDEN_LEADS_CACHE_KEY, result.data);
 
     const rawList = Array.isArray(result.data)
       ? result.data
       : (result.data.data || result.data.leads || result.data.items || []);
 
-    return (rawList || []).map((apiLead) => ({
+    return applyPendingUpdates((rawList || []).map((apiLead) => ({
       id: apiLead.id,
       name: apiLead.name || "—",
       salutation: apiLead.salutation || "",
@@ -255,24 +988,35 @@ const kundenPage = (function () {
       telefon: apiLead.telefon || "",
       email: apiLead.email || "",
       nachfassen: apiLead.nachfassen,
+      erstberatung_telefon: normalizeErstberatungValue(apiLead.erstberatung_telefon || ""),
       delegieren: apiLead.delegieren,
+      plz: apiLead.plz || "",
+      angebot: apiLead.angebot || "",
+      qualification: apiLead.einschaetzung_kunde || "",
+      kontaktVia: apiLead.kontakt_via || "",
+      zusatzExtras: apiLead.zusaetzliche_extras || "",
+      salesTyp: apiLead.sale_typ || "",
       notes: [],
       activities: [],
-    }));
+    })));
   }
 
   async function fetchDashboardStats() {
-    const result = await fetchFirstAvailable([
-      { url: SO_DASHBOARD, delay: 0 },
-      { url: REMOTE_DASHBOARD_URL, delay: 700 },
-      { url: PROXY_DASHBOARD_URL, delay: 1100 },
-      { url: ALT_PROXY_DASHBOARD_URL, delay: 1400 },
-    ]);
+    const result = await fetchFirstAvailable(
+      getResilientFetchEndpoints(SO_DASHBOARD, REMOTE_DASHBOARD_URL)
+    );
 
     if (!result.success || !result.data) {
+      const cached = loadJsonCache(KUNDEN_DASHBOARD_CACHE_KEY);
+      if (cached && typeof cached === "object") {
+        console.warn("Using cached dashboard stats because live endpoints failed.");
+        return cached;
+      }
       console.error("Failed to fetch dashboard stats:", result.error);
       return {};
     }
+
+    saveJsonCache(KUNDEN_DASHBOARD_CACHE_KEY, result.data);
 
     if (result.data.data && typeof result.data.data === 'object') return result.data.data;
     if (typeof result.data === 'object') return result.data;
@@ -300,6 +1044,7 @@ const kundenPage = (function () {
         if (tbody) {
           tbody.innerHTML = `<td colspan="14"><div class="empty-state">❌ Fehler beim Laden der Leads.</div>`;
         }
+        showToast("Kunden Daten konnten live nicht geladen werden.", "error", 3000);
       })
       .finally(() => {
         isLoading = false;
@@ -316,18 +1061,48 @@ const kundenPage = (function () {
   }
 
   function populateFilterOptions() {
-    const uniqueStatuses = [...new Set(leadsData.map(lead => lead.status).filter(s => s && s !== "—"))];
+    const uniqueStatuses = [...new Set(leadsData.map((lead) => lead.status).filter((s) => s && s !== "???" && s !== "?"))];
     const statusSelect = document.getElementById("filter-status");
     if (statusSelect) {
-      statusSelect.innerHTML = '<option value="">Alle Status</option>' + 
-        uniqueStatuses.map(status => `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`).join('');
+      statusSelect.innerHTML = '<option value="">Alle Status</option>' +
+        uniqueStatuses
+          .map((status) => '<option value="' + escapeHtml(status) + '">' + escapeHtml(status) + '</option>')
+          .join('');
     }
-    
-    const uniqueSources = [...new Set(leadsData.map(lead => lead.quelle).filter(s => s && s !== "—"))];
+
+    const uniqueSources = [...new Set(leadsData.map((lead) => lead.quelle).filter((s) => s && s !== "???" && s !== "?"))];
     const sourceSelect = document.getElementById("filter-source");
     if (sourceSelect) {
-      sourceSelect.innerHTML = '<option value="">Alle Quellen</option>' + 
-        uniqueSources.map(source => `<option value="${escapeHtml(source)}">${escapeHtml(source)}</option>`).join('');
+      sourceSelect.innerHTML = '<option value="">Alle Quellen</option>' +
+        uniqueSources
+          .map((source) => '<option value="' + escapeHtml(source) + '">' + escapeHtml(source) + '</option>')
+          .join('');
+    }
+
+    const uniqueBearbeiter = [...new Set(
+      leadsData
+        .map((lead) => String(lead.bearbeiter || "").trim())
+        .filter((value) => value && value !== "???" && value !== "?")
+    )];
+    const bearbeiterSelect = document.getElementById("filter-bearbeiter");
+    if (bearbeiterSelect) {
+      bearbeiterSelect.innerHTML = '<option value="">Alle Bearbeiter</option>' +
+        uniqueBearbeiter
+          .map((value) => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + '</option>')
+          .join('');
+    }
+
+    const uniqueDelegieren = [...new Set(
+      leadsData
+        .map((lead) => String(lead.delegieren || "").trim())
+        .filter((value) => value && value !== "???" && value !== "?")
+    )];
+    const delegierenSelect = document.getElementById("filter-delegieren");
+    if (delegierenSelect) {
+      delegierenSelect.innerHTML = '<option value="">Alle Delegieren</option>' +
+        uniqueDelegieren
+          .map((value) => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + '</option>')
+          .join('');
     }
   }
 
@@ -339,15 +1114,21 @@ const kundenPage = (function () {
     statusFilter = "";
     leadSourceFilter = "";
     ortSearchTerm = "";
-    
+    bearbeiterFilter = "";
+    delegierenFilter = "";
+
     const statusSelect = document.getElementById("filter-status");
     const sourceSelect = document.getElementById("filter-source");
     const ortInput = document.getElementById("filter-ort");
-    
+    const bearbeiterSelect = document.getElementById("filter-bearbeiter");
+    const delegierenSelect = document.getElementById("filter-delegieren");
+
     if (statusSelect) statusSelect.value = "";
     if (sourceSelect) sourceSelect.value = "";
     if (ortInput) ortInput.value = "";
-    
+    if (bearbeiterSelect) bearbeiterSelect.value = "";
+    if (delegierenSelect) delegierenSelect.value = "";
+
     renderKunden();
   }
 
@@ -594,7 +1375,6 @@ const kundenPage = (function () {
     modal.classList.add('active');
   }
 
-  // Function to open teleconsultation modal when checkbox is clicked
   function openTeleconsultationModal(leadId, checkboxElement) {
     const lead = leadsData.find(l => l.id === leadId);
     if (!lead) return;
@@ -652,7 +1432,6 @@ const kundenPage = (function () {
       const selectedValue = document.getElementById("teleconsultationSelect")?.value;
       
       if (selectedValue === 'true') {
-        // Check the checkbox
         if (checkboxElement && !checkboxElement.checked) {
           checkboxElement.checked = true;
           selectedKunden.add(leadId);
@@ -660,17 +1439,15 @@ const kundenPage = (function () {
           updateMassEmailButton();
         }
         
-        // Enable edit for this lead
         const editCheckbox = document.querySelector(`.edit-cb[data-id="${leadId}"]`);
         if (editCheckbox && !editCheckbox.checked) {
           editCheckbox.checked = true;
-          checkedEdit.add(leadId);
+          checkedEdit.add(String(leadId));
           const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
           if (editBtn) editBtn.disabled = false;
         }
         teleconsultationSelections.set(leadId, 'true');
       } else if (selectedValue === 'false') {
-        // Uncheck the checkbox
         if (checkboxElement && checkboxElement.checked) {
           checkboxElement.checked = false;
           selectedKunden.delete(leadId);
@@ -678,11 +1455,10 @@ const kundenPage = (function () {
           updateMassEmailButton();
         }
         
-        // Disable edit for this lead
         const editCheckbox = document.querySelector(`.edit-cb[data-id="${leadId}"]`);
         if (editCheckbox && editCheckbox.checked) {
           editCheckbox.checked = false;
-          checkedEdit.delete(leadId);
+          checkedEdit.delete(String(leadId));
           const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
           if (editBtn) editBtn.disabled = true;
         }
@@ -696,15 +1472,14 @@ const kundenPage = (function () {
     modal.classList.add('active');
   }
 
-  // Function to open edit status modal (only when edit is enabled)
   function openEditStatusModal(leadId) {
-    if (!checkedEdit.has(leadId)) {
-      alert("Bitte aktivieren Sie zuerst die Beratung mit WAHR");
-      return;
-    }
-    
     const lead = leadsData.find(l => l.id === leadId);
     if (!lead) return;
+
+    if (!checkedEdit.has(String(leadId)) && !isErstberatungChecked(lead)) {
+      showToast("Bitte aktivieren Sie zuerst die Beratung mit WAHR", "error", 2500);
+      return;
+    }
     
     const modalHtml = `
       <div id="editStatusModal" class="k-modal-overlay">
@@ -764,7 +1539,339 @@ const kundenPage = (function () {
     modal.classList.add('active');
   }
 
-  // Optimized view function - loads data faster
+  // ========== Full Edit Popup with API Integration ==========
+  function openFullEditModal(leadId) {
+    const lead = leadsData.find(l => l.id === leadId);
+    if (!lead) return;
+    
+    const modalHtml = `
+      <div id="fullEditModal" class="k-modal-overlay">
+        <div class="k-modal-content" style="max-width: 750px; max-height: 90vh;">
+          <div class="k-modal-header">
+            <h3>Lead bearbeiten - ${escapeHtml(lead.name)}</h3>
+            <button class="k-close-btn" id="closeFullEditModal">&times;</button>
+          </div>
+          <div class="k-modal-body" style="overflow-y: auto;">
+            <form id="fullEditForm">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <!-- Contact Information -->
+                <div class="form-group">
+                  <label>Anrede</label>
+                  <select id="edit_salutation" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    <option value="Herr" ${lead.salutation === 'Herr' ? 'selected' : ''}>Herr</option>
+                    <option value="Frau" ${lead.salutation === 'Frau' ? 'selected' : ''}>Frau</option>
+                    <option value="Divers" ${lead.salutation === 'Divers' ? 'selected' : ''}>Divers</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Name *</label>
+                  <input type="text" id="edit_name" class="k-full-input" value="${escapeHtml(lead.name)}" required>
+                </div>
+                <div class="form-group">
+                  <label>Straße Objekt</label>
+                  <input type="text" id="edit_strasse" class="k-full-input" value="${escapeHtml(lead.strasse || '')}">
+                </div>
+                <div class="form-group">
+                  <label>PLZ</label>
+                  <input type="text" id="edit_plz" class="k-full-input" value="${escapeHtml(lead.plz || '')}">
+                </div>
+                <div class="form-group">
+                  <label>Ort</label>
+                  <input type="text" id="edit_ort" class="k-full-input" value="${escapeHtml(lead.ort)}">
+                </div>
+                <div class="form-group">
+                  <label>Telefon</label>
+                  <input type="text" id="edit_telefon" class="k-full-input" value="${escapeHtml(lead.telefon || '')}">
+                </div>
+                <div class="form-group">
+                  <label>E-Mail</label>
+                  <input type="email" id="edit_email" class="k-full-input" value="${escapeHtml(lead.email || '')}">
+                </div>
+                <div class="form-group">
+                  <label>Kontakt Via</label>
+                  <select id="edit_kontaktVia" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    <option value="Telefon" ${lead.kontaktVia === 'Telefon' ? 'selected' : ''}>Telefon</option>
+                    <option value="E-Mail" ${lead.kontaktVia === 'E-Mail' ? 'selected' : ''}>E-Mail</option>
+                    <option value="Leadformular" ${lead.kontaktVia === 'Leadformular' ? 'selected' : ''}>Leadformular</option>
+                    <option value="Anruf" ${lead.kontaktVia === 'Anruf' ? 'selected' : ''}>Anruf</option>
+                  </select>
+                </div>
+                
+                <!-- Lead Information -->
+                <div class="form-group">
+                  <label>Status</label>
+                  <select id="edit_status" class="k-full-select">
+                    ${EDIT_STATUS_OPTIONS.map(opt => `<option value="${opt}" ${lead.status === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Qualification</label>
+                  <select id="edit_qualification" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    <option value="Hoch" ${lead.qualification === 'Hoch' ? 'selected' : ''}>Hoch</option>
+                    <option value="Mittel" ${lead.qualification === 'Mittel' ? 'selected' : ''}>Mittel</option>
+                    <option value="Niedrig" ${lead.qualification === 'Niedrig' ? 'selected' : ''}>Niedrig</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Lead Quelle</label>
+                  <select id="edit_quelle" class="k-full-select">
+                    ${QUELLE_OPTIONS.map(opt => `<option value="${opt}" ${lead.quelle === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Bearbeiter</label>
+                  <select id="edit_bearbeiter" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    ${BEARBEITER_OPTIONS.map(opt => `<option value="${opt}" ${lead.bearbeiter === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Erstberatung Telefon</label>
+                  <select id="edit_erstberatung_telefon" class="k-full-select">
+                    <option value="">W??hlen...</option>
+                    <option value="WAHR" ${normalizeErstberatungValue(lead.erstberatung_telefon) === 'WAHR' ? 'selected' : ''}>WAHR</option>
+                    <option value="FALSCH" ${normalizeErstberatungValue(lead.erstberatung_telefon) === 'FALSCH' ? 'selected' : ''}>FALSCH</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Delegieren</label>
+                  <select id="edit_delegieren" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    ${BEARBEITER_OPTIONS.map(opt => `<option value="${opt}" ${lead.delegieren === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Angebot</label>
+                  <input type="text" id="edit_angebot" class="k-full-input" value="${escapeHtml(lead.angebot || '')}">
+                </div>
+                <div class="form-group">
+                  <label>Summe Netto</label>
+                  <input type="text" id="edit_summe" class="k-full-input" value="${escapeHtml(lead.summe.replace('$ ', ''))}">
+                </div>
+                <div class="form-group">
+                  <label>Datum</label>
+                  <input type="date" id="edit_datum" class="k-full-input" value="${escapeHtml(lead.datum !== '—' ? lead.datum : '')}">
+                </div>
+                <div class="form-group">
+                  <label>Nachfassen</label>
+                  <input type="date" id="edit_nachfassen" class="k-full-input" value="${escapeHtml(lead.nachfassen || '')}">
+                </div>
+                <div class="form-group">
+                  <label>Sales Typ</label>
+                  <select id="edit_salesTyp" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    <option value="Inbound" ${lead.salesTyp === 'Inbound' ? 'selected' : ''}>Inbound</option>
+                    <option value="Outbound" ${lead.salesTyp === 'Outbound' ? 'selected' : ''}>Outbound</option>
+                  </select>
+                </div>
+                
+                <!-- Roof Details -->
+                <div class="form-group">
+                  <label>Dachfläche (m²)</label>
+                  <input type="text" id="edit_dachflaeche" class="k-full-input" value="${escapeHtml(lead.dachflaeche || '')}">
+                </div>
+                <div class="form-group">
+                  <label>Dachneigung Grad</label>
+                  <select id="edit_dachneigung" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    ${DACHNEIGUNG_OPTIONS.map(opt => `<option value="${opt}" ${lead.dachneigung === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Dacheindeckung</label>
+                  <select id="edit_dacheindeckung" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    ${DACHEINDECKUNG_OPTIONS.map(opt => `<option value="${opt}" ${lead.dacheindeckung === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Wunsch Farbe</label>
+                  <select id="edit_farbe" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    ${FARBE_OPTIONS.map(opt => `<option value="${opt}" ${lead.farbe === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Dachpfanne</label>
+                  <select id="edit_dachpfanne" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    ${DACHPFANNE_OPTIONS.map(opt => `<option value="${opt}" ${lead.dachpfanne === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Baujahr Dach</label>
+                  <select id="edit_baujahr" class="k-full-select">
+                    <option value="">Wählen...</option>
+                    ${Array.from({ length: 80 }, (_, i) => 2024 - i).map(y => `<option value="${y}" ${lead.dachalter === String(y) ? 'selected' : ''}>${y}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Zusätzliche Extras</label>
+                  <input type="text" id="edit_zusatzExtras" class="k-full-input" value="${escapeHtml(lead.zusatzExtras || '')}">
+                </div>
+              </div>
+              <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
+                <button type="button" id="cancelFullEdit" class="k-btn-outline">Abbrechen</button>
+                <button type="button" id="saveFullEdit" class="k-btn-green">Änderungen speichern</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    const existingModal = document.getElementById("fullEditModal");
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById("fullEditModal");
+    const closeBtn = document.getElementById("closeFullEditModal");
+    const cancelBtn = document.getElementById("cancelFullEdit");
+    const saveBtn = document.getElementById("saveFullEdit");
+    
+    const closeModal = () => {
+      modal.classList.remove('active');
+      setTimeout(() => modal.remove(), 300);
+    };
+    
+    closeBtn?.addEventListener('click', closeModal);
+    cancelBtn?.addEventListener('click', closeModal);
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+    
+    saveBtn?.addEventListener('click', async () => {
+      try {
+        showToast("Updating lead...", "info", 1000);
+        
+        const editId = String(lead.id).trim();
+        if (!editId || editId === "null" || editId === "undefined") {
+          throw new Error("Lead ID fehlt");
+        }
+        
+const payload = {
+  id: editId,
+  lead_id: editId,
+  name: document.getElementById("edit_name")?.value || '',
+  salutation: document.getElementById("edit_salutation")?.value || '',
+  erstberatung_telefon: document.getElementById("edit_erstberatung_telefon")?.value || '',
+  strasse_objekt: document.getElementById("edit_strasse")?.value || '',
+  angebot: document.getElementById("edit_angebot")?.value || '',
+  plz: document.getElementById("edit_plz")?.value || '',
+  ort: document.getElementById("edit_ort")?.value || '',
+  telefon: document.getElementById("edit_telefon")?.value || '',
+  email: document.getElementById("edit_email")?.value || '',
+  status: document.getElementById("edit_status")?.value || lead.status,
+  einschaetzung_kunde: document.getElementById("edit_qualification")?.value || '',
+  lead_quelle: document.getElementById("edit_quelle")?.value || '',
+  kontakt_via: document.getElementById("edit_kontaktVia")?.value || '',
+  datum: document.getElementById("edit_datum")?.value || lead.datum,
+  nachfassen: document.getElementById("edit_nachfassen")?.value || '',
+  bearbeiter: document.getElementById("edit_bearbeiter")?.value || '',
+  delegieren: document.getElementById("edit_delegieren")?.value || '',
+  summe_netto: document.getElementById("edit_summe")?.value || '',
+  dachflaeche_m2: document.getElementById("edit_dachflaeche")?.value || '',
+  dachneigung_grad: document.getElementById("edit_dachneigung")?.value || '',
+  dacheindeckung: document.getElementById("edit_dacheindeckung")?.value || '',
+  wunsch_farbe: document.getElementById("edit_farbe")?.value || '',
+  dachpfanne: document.getElementById("edit_dachpfanne")?.value || '',
+  baujahr_dach: document.getElementById("edit_baujahr")?.value || '',
+  zusaetzliche_extras: document.getElementById("edit_zusatzExtras")?.value || '',
+  sale_typ: document.getElementById("edit_salesTyp")?.value || '',
+};
+        
+        const response = await updateLeadOnAPI(editId, payload);
+        console.log("Update response:", response);
+         // 👇 YAHAN LAGAO (approximately line 970-980 ke beech)
+    activityCache.delete(String(lead.id));
+    notesCache.delete(String(lead.id));
+        // Update local lead data
+        const updatedLead = {
+          ...lead,
+          salutation: payload.salutation,
+          name: payload.name,
+          strasse: payload.strasse_objekt,
+          plz: payload.plz,
+          ort: payload.ort,
+          telefon: payload.telefon,
+          email: payload.email,
+          kontaktVia: payload.kontakt_via,
+          status: payload.status,
+          qualification: payload.einschaetzung_kunde,
+          quelle: payload.lead_quelle,
+          bearbeiter: payload.bearbeiter,
+          delegieren: payload.delegieren || "",
+          angebot: payload.angebot,
+          summe: payload.summe_netto ? `$ ${formatNumber(payload.summe_netto)}` : "$ 0,00",
+          datum: payload.datum || lead.datum,
+          nachfassen: payload.nachfassen,
+          salesTyp: payload.sale_typ,
+          dachflaeche: payload.dachflaeche_m2,
+          dachneigung: payload.dachneigung_grad,
+          dacheindeckung: payload.dacheindeckung,
+          farbe: payload.wunsch_farbe,
+          dachpfanne: payload.dachpfanne,
+          dachalter: payload.baujahr_dach,
+          zusatzExtras: payload.zusaetzliche_extras,
+          erstberatung_telefon: payload.erstberatung_telefon || lead.erstberatung_telefon || "",
+          statusClass: getStatusClass(payload.status),
+        };
+        
+        queuePendingUpdate(lead.id, updatedLead);
+        Object.assign(lead, updatedLead);
+
+        const erstberatungValue = normalizeErstberatungValue(
+          payload.erstberatung_telefon || lead.erstberatung_telefon || "",
+        );
+        if (erstberatungValue === "WAHR") {
+          teleconsultationSelections.set(lead.id, "true");
+          syncEditPermissionState(lead.id, true);
+        } else if (erstberatungValue === "FALSCH") {
+          teleconsultationSelections.set(lead.id, "false");
+          syncEditPermissionState(lead.id, false);
+        }
+        
+        showToast("Lead erfolgreich aktualisiert!", "success", 2000);
+        renderKunden();
+        closeModal();
+        
+        // Log activity
+        const actor = resolveActivityActorForLead(
+          lead.id,
+          payload.bearbeiter || lead.bearbeiter,
+        );
+        const activityText = rewriteActivityTextActor(
+          `${actor} hat Lead ${lead.name} aktualisiert`,
+          actor,
+        );
+        addOptimisticActivity(lead.id, {
+          text: activityText,
+          by: actor,
+          at: new Date().toLocaleString(),
+        });
+        
+        try {
+          await insertActivity(lead.id, "update", activityText, {
+            from: actor,
+            leadName: lead.name,
+          });
+        } catch (e) {
+          console.warn("Activity log failed:", e);
+        }
+        
+      } catch (err) {
+        console.error("Update error:", err);
+        showToast(err.message || "Update fehlgeschlagen", "error", 3000);
+      }
+    });
+    
+    modal.classList.add('active');
+  }
+
   window.viewKunde = async (id) => {
     const lead = leadsData.find((l) => l.id === id);
     if (!lead) return;
@@ -807,13 +1914,19 @@ const kundenPage = (function () {
       if (activities && activities.length > 0) {
         activitiesHtml = activities.map(activity => `
           <div class="timeline-item">
-            <div class="timeline-icon">📋</div>
             <div class="timeline-content">
               <div class="timeline-text">${escapeHtml(activity.text)}</div>
               <div class="timeline-meta">
-                <span class="timeline-author">${escapeHtml(activity.by)}</span>
-                <span class="timeline-date">${escapeHtml(activity.at || 'Kein Datum')}</span>
+<div class="timeline-activity">
+  <div class="timeline-activity-label">Activity from:</div>
+  <span class="timeline-author">${escapeHtml(activity.by)}</span>
+</div>
+<div class="timeline-activity-date">
+  <div class="timeline-activity-label">Activity Time:</div>
+  <span class="timeline-date">${escapeHtml(activity.at || 'Kein Datum')}</span>
+</div>
               </div>
+                </div>
             </div>
           </div>
         `).join('');
@@ -828,16 +1941,23 @@ const kundenPage = (function () {
           <div class="k-detail-row"><div class="k-detail-label">Name</div><div class="k-detail-value">${escapeHtml(lead.name)}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Ort</div><div class="k-detail-value">${escapeHtml(lead.ort)}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Straße</div><div class="k-detail-value">${escapeHtml(lead.strasse || "—")}</div></div>
+          <div class="k-detail-row"><div class="k-detail-label">PLZ</div><div class="k-detail-value">${escapeHtml(lead.plz || "—")}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Telefon</div><div class="k-detail-value">${escapeHtml(lead.telefon || "—")}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">E-Mail</div><div class="k-detail-value">${escapeHtml(lead.email || "—")}</div></div>
+          <div class="k-detail-row"><div class="k-detail-label">Kontakt Via</div><div class="k-detail-value">${escapeHtml(lead.kontaktVia || "—")}</div></div>
         </div>
         <div class="k-view-section">
           <h4>Lead Informationen</h4>
           <div class="k-detail-row"><div class="k-detail-label">Status</div><div class="k-detail-value"><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></div></div>
           <div class="k-detail-row"><div class="k-detail-label">Lead Quelle</div><div class="k-detail-value">${escapeHtml(lead.quelle || "—")}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Bearbeiter</div><div class="k-detail-value">${escapeHtml(lead.bearbeiter || "—")}</div></div>
+          <div class="k-detail-row"><div class="k-detail-label">Delegieren</div><div class="k-detail-value">${escapeHtml(lead.delegieren || "—")}</div></div>
+             <div class="k-detail-row"><div class="k-detail-label">Erstberatung Telefon</div><div class="k-detail-value">${escapeHtml(lead.erstberatung_telefon || "—")}</div></div>
+          <div class="k-detail-row"><div class="k-detail-label">Angebot</div><div class="k-detail-value">${escapeHtml(lead.angebot || "—")}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Summe Netto</div><div class="k-detail-value">${escapeHtml(lead.summe)}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Datum</div><div class="k-detail-value">${escapeHtml(lead.datum)}</div></div>
+          <div class="k-detail-row"><div class="k-detail-label">Nachfassen</div><div class="k-detail-value">${escapeHtml(lead.nachfassen || "—")}</div></div>
+          <div class="k-detail-row"><div class="k-detail-label">Sales Typ</div><div class="k-detail-value">${escapeHtml(lead.salesTyp || "—")}</div></div>
         </div>
         <div class="k-view-section">
           <h4>Dachdetails</h4>
@@ -847,6 +1967,7 @@ const kundenPage = (function () {
           <div class="k-detail-row"><div class="k-detail-label">Dachpfanne</div><div class="k-detail-value">${escapeHtml(lead.dachpfanne || "—")}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Wunsch Farbe</div><div class="k-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Dachneigung Grad</div><div class="k-detail-value">${escapeHtml(lead.dachneigung || "—")}</div></div>
+          <div class="k-detail-row"><div class="k-detail-label">Zusätzliche Extras</div><div class="k-detail-value">${escapeHtml(lead.zusatzExtras || "—")}</div></div>
         </div>
         
         <div class="k-view-section">
@@ -866,53 +1987,59 @@ const kundenPage = (function () {
     }
   };
 
-  window.callKunde = async (id) => {
-    const lead = leadsData.find((l) => l.id === id);
-    if (lead && lead.telefon) {
-      let phoneNumber = String(lead.telefon).replace(/[\s\-\(\)]/g, '');
-      
-      if (phoneNumber.startsWith('0') && !phoneNumber.startsWith('+')) {
-        phoneNumber = '+49' + phoneNumber.substring(1);
-      } else if (!phoneNumber.startsWith('+') && !phoneNumber.startsWith('00')) {
-        phoneNumber = '+49' + phoneNumber;
-      }
-      
-      const baseUrl = "https://msdach.3cx.eu:5001/webclient/#/call";
-      const callUrl = `${baseUrl}?phone=${encodeURIComponent(phoneNumber)}`;
-      
-      console.log(`📞 Calling ${lead.name} (ID: ${lead.id}) at ${phoneNumber}`);
-      console.log(`🔗 Opening 3CX: ${callUrl}`);
-      
-      window.open(callUrl, "_blank");
-      
-      try {
-        const activityData = {
-          lead_id: lead.id,
-          lead_name: lead.name,
-          action: "call_initiated",
-          phone: lead.telefon,
-          phone_formatted: phoneNumber,
-          timestamp: new Date().toISOString(),
-          user: lead.bearbeiter || "current_user",
-          source: "kunden_page_phone_icon"
-        };
-        
-        console.log("✅ Call logged:", activityData);
-      } catch (err) {
-        console.warn("⚠️ Failed to log call activity:", err.message);
-      }
-      
-    } else {
-      alert("Keine Telefonnummer vorhanden für diesen Kunden.");
+ window.callKunde = async (id) => {
+  const lead = leadsData.find((l) => l.id === id);
+  if (lead && lead.telefon) {
+    let phoneNumber = String(lead.telefon).replace(/[\s\-\(\)]/g, '');
+    
+    if (phoneNumber.startsWith('0') && !phoneNumber.startsWith('+')) {
+      phoneNumber = '' + phoneNumber.substring(1);
+    } else if (!phoneNumber.startsWith('+') && !phoneNumber.startsWith('00')) {
+      phoneNumber = '' + phoneNumber;
     }
-  };
+    
+    const baseUrl = "https://msdach.3cx.eu:5001/webclient/#/call";
+    const callUrl = `${baseUrl}?phone=${encodeURIComponent(phoneNumber)}`;
+    
+    window.open(callUrl, "_blank");
+    const actor = resolveActivityActorForLead(lead.id, lead.bearbeiter);
+    const activityText = rewriteActivityTextActor(
+      `${actor} rief an ${phoneNumber}`,
+      actor,
+    );
+    
+    // Add optimistic activity for UI
+    addOptimisticActivity(lead.id, {
+      text: activityText,
+      by: actor,
+      at: new Date().toLocaleString(),
+    });
+    
+    try {
+      // Pass bearbeiter explicitly
+      await insertActivity(lead.id, "call", activityText, {
+        bearbeiter: actor,  // This is CRITICAL
+        from: actor,
+        phone: phoneNumber,
+        leadName: lead.name,
+      });
+      console.log(`✅ Activity recorded for lead ${lead.id}: ${activityText} by ${actor}`);
+    } catch (err) {
+      console.warn("Failed to record call activity:", err.message);
+    }
+    
+    showToast(`Anruf wird gestartet: ${phoneNumber}`, "success", 3000);
+  } else {
+    showToast("Keine Telefonnummer vorhanden", "error", 2500);
+  }
+};
 
   window.sendEmailToKunde = (id) => {
     const lead = leadsData.find((l) => l.id === id);
     if (lead && lead.email) {
       alert(`E-Mail wird gesendet an: ${lead.email}`);
     } else {
-      alert("Keine E-Mail Adresse vorhanden");
+      showToast("Is customer ke liye email address available nahi hai.", "error", 2500);
     }
   };
 
@@ -930,6 +2057,7 @@ const kundenPage = (function () {
   };
 
   window.openMassEmailModal = openMassEmailModal;
+  window.openFullEditModal = openFullEditModal;
 
   function renderKunden() {
     if (!leadsData.length) {
@@ -961,6 +2089,9 @@ const kundenPage = (function () {
     statusFilter = document.getElementById("filter-status")?.value || "";
     leadSourceFilter = document.getElementById("filter-source")?.value || "";
     ortSearchTerm = (document.getElementById("filter-ort")?.value || "").toLowerCase();
+    bearbeiterFilter = document.getElementById("filter-bearbeiter")?.value || "";
+    delegierenFilter = document.getElementById("filter-delegieren")?.value || "";  // Add this line
+
 
     let data = leadsData.slice();
     
@@ -991,6 +2122,13 @@ const kundenPage = (function () {
       );
     }
 
+    if (bearbeiterFilter) {
+      data = data.filter(l => l.bearbeiter === bearbeiterFilter);
+    }
+    if (delegierenFilter) {  // Add this block
+    data = data.filter(l => l.delegieren === delegierenFilter);
+}
+
     filteredData = data;
 
     const tbody = document.getElementById("kunden-tbody");
@@ -1008,7 +2146,7 @@ const kundenPage = (function () {
 
     filteredData.forEach((lead) => {
       const isExp = expandedRows.has(lead.id);
-      const editCb = checkedEdit.has(lead.id);
+      const editCb = checkedEdit.has(String(lead.id)) || isErstberatungChecked(lead);
       const displayName =
         (lead.salutation ? lead.salutation + " " : "") + lead.name;
 
@@ -1028,9 +2166,8 @@ const kundenPage = (function () {
           <td><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></td>
           <td>${lead.quelle ? `<span class="tag">${escapeHtml(lead.quelle)}</span>` : ""}</td>
           <td>${lead.bearbeiter ? `<span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span>` : ""}</td>
-          <td>
-          <div style="width:32px;height:32px;border-radius:50%;background:#f0f0f0;"></div>
-          </td>
+
+          <td><div class="delegate-dot">${escapeHtml(lead.delegieren || "—")}</div></td>
           <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
           <td><span class="date-cell">${escapeHtml(lead.datum)}</span></td>
           <td>
@@ -1083,6 +2220,12 @@ const kundenPage = (function () {
 
       const xtr = document.createElement("tr");
       xtr.className = `expand-row${isExp ? " open" : ""}`;
+      xtr.addEventListener('click', (e) => {
+        if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a')) return;
+        openFullEditModal(lead.id);
+      });
+      xtr.style.cursor = 'pointer';
+      xtr.title = 'Klicken Sie zum Bearbeiten der Lead-Daten';
       xtr.innerHTML = `<td colspan="14"><div class="expand-grid">
         <div class="expand-item"><label>Dachfläche (m²)</label><span>${escapeHtml(lead.dachflaeche || "—")}</span></div>
         <div class="expand-item"><label>Dacheindeckung</label><span>${escapeHtml(lead.dacheindeckung || "—")}</span></div>
@@ -1091,6 +2234,7 @@ const kundenPage = (function () {
         <div class="expand-item"><label>Wunsch Farbe</label><span>${escapeHtml(lead.farbe || "—")}</span></div>
         <div class="expand-item"><label>Dachneigung Grad</label><span>${escapeHtml(lead.dachneigung || "—")}</span></div>
         <div class="expand-item"><label>Straße</label><span>${escapeHtml(lead.strasse || "—")}</span></div>
+        <div class="expand-item"><label>PLZ</label><span>${escapeHtml(lead.plz || "—")}</span></div>
         <div class="expand-item"><label>Telefon</label><span>${escapeHtml(lead.telefon || "—")}</span></div>
         <div class="expand-item"><label>E-Mail</label><span>${escapeHtml(lead.email || "—")}</span></div>
       </div>`;
@@ -1140,125 +2284,157 @@ const kundenPage = (function () {
     renderKunden();
   };
 
-  // Handle edit checkbox click - opens teleconsultation modal
-  window.handleEditCheckboxClick = (id, checkboxElement) => {
-    // Prevent default behavior - we'll handle it manually
-    const isCurrentlyChecked = checkboxElement.checked;
-    
-    // Open modal to let user choose WAHR/FALSCH
-    openTeleconsultationModalWithCallback(id, checkboxElement, isCurrentlyChecked);
-  };
+window.handleEditCheckboxClick = (id, checkboxElement) => {
+  const lead = leadsData.find((item) => String(item.id) === String(id));
+  const originalState = checkedEdit.has(String(id)) || isErstberatungChecked(lead);
+  checkboxElement.checked = originalState;
+  openTeleconsultationModalWithCallback(id, checkboxElement, originalState);
+};
 
-  // Modified teleconsultation modal with callback
-  function openTeleconsultationModalWithCallback(leadId, checkboxElement, originalState) {
-    const lead = leadsData.find(l => l.id === leadId);
-    if (!lead) return;
-    
-    const currentSelection = teleconsultationSelections.get(leadId) || '';
-    
-    const modalHtml = `
-      <div id="teleconsultationModal" class="k-modal-overlay">
-        <div class="k-modal-content" style="max-width: 500px;">
-          <div class="k-modal-header">
-            <h3>Erstberatung Telefon</h3>
-            <button class="k-close-btn" id="closeTeleModal">&times;</button>
+function openTeleconsultationModalWithCallback(leadId, checkboxElement, originalState) {
+  const lead = leadsData.find(l => l.id === leadId);
+  if (!lead) return;
+  
+  const currentSelection = getTeleconsultationSelection(leadId);
+  
+  const modalHtml = `
+    <div id="teleconsultationModal" class="k-modal-overlay">
+      <div class="k-modal-content" style="max-width: 500px;">
+        <div class="k-modal-header">
+          <h3>Erstberatung Telefon</h3>
+          <button class="k-close-btn" id="closeTeleModal">&times;</button>
+        </div>
+        <div class="k-modal-body">
+          <div class="form-group" style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Wählen Sie eine Option:</label>
+            <select id="teleconsultationSelect" class="k-full-select">
+              <option value="">Bitte wählen</option>
+              <option value="true" ${currentSelection === 'true' ? 'selected' : ''}>WAHR</option>
+              <option value="false" ${currentSelection === 'false' ? 'selected' : ''}>FALSCH</option>
+            </select>
           </div>
-          <div class="k-modal-body">
-            <div class="form-group" style="margin-bottom: 20px;">
-              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Wählen Sie eine Option:</label>
-              <select id="teleconsultationSelect" class="k-full-select">
-                <option value="">Bitte wählen</option>
-                <option value="true" ${currentSelection === 'true' ? 'selected' : ''}>WAHR</option>
-                <option value="false" ${currentSelection === 'false' ? 'selected' : ''}>FALSCH</option>
-              </select>
-            </div>
-            
-            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
-              <button type="button" id="cancelTeleModal" class="k-btn-outline" style="padding: 10px 24px;">Abbrechen</button>
-              <button type="button" id="updateTeleconsultation" class="k-btn-green" style="padding: 10px 24px;">Aktualisierung Erstberatung Telefon</button>
-            </div>
+          
+          <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+            <button type="button" id="cancelTeleModal" class="k-btn-outline" style="padding: 10px 24px;">Abbrechen</button>
+            <button type="button" id="updateTeleconsultation" class="k-btn-green" style="padding: 10px 24px;">Aktualisierung Erstberatung Telefon</button>
           </div>
         </div>
       </div>
-    `;
-    
-    const existingModal = document.getElementById("teleconsultationModal");
-    if (existingModal) existingModal.remove();
-    
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    const modal = document.getElementById("teleconsultationModal");
-    const closeBtn = document.getElementById("closeTeleModal");
-    const cancelBtn = document.getElementById("cancelTeleModal");
-    const updateBtn = document.getElementById("updateTeleconsultation");
-    
-    const closeModal = () => {
-      modal.classList.remove('active');
-      setTimeout(() => modal.remove(), 300);
-      // Reset checkbox to original state if modal was closed without saving
-      if (checkboxElement) {
-        checkboxElement.checked = originalState;
-      }
-    };
-    
-    closeBtn?.addEventListener('click', closeModal);
-    cancelBtn?.addEventListener('click', closeModal);
-    modal?.addEventListener('click', (e) => {
-      if (e.target === modal) closeModal();
-    });
-    
-    updateBtn?.addEventListener('click', () => {
-      const selectedValue = document.getElementById("teleconsultationSelect")?.value;
-      
-      if (selectedValue === 'true') {
-        // Check the checkbox
-        if (checkboxElement && !checkboxElement.checked) {
-          checkboxElement.checked = true;
-          selectedKunden.add(leadId);
-          updateCount();
-          updateMassEmailButton();
-        }
-        
-        // Enable edit for this lead
-        const editCheckbox = document.querySelector(`.edit-cb[data-id="${leadId}"]`);
-        if (editCheckbox && !editCheckbox.checked) {
-          editCheckbox.checked = true;
-          checkedEdit.add(leadId);
-          const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
-          if (editBtn) editBtn.disabled = false;
-        }
-        teleconsultationSelections.set(leadId, 'true');
-      } else if (selectedValue === 'false') {
-        // Uncheck the checkbox
-        if (checkboxElement && checkboxElement.checked) {
-          checkboxElement.checked = false;
-          selectedKunden.delete(leadId);
-          updateCount();
-          updateMassEmailButton();
-        }
-        
-        // Disable edit for this lead
-        const editCheckbox = document.querySelector(`.edit-cb[data-id="${leadId}"]`);
-        if (editCheckbox && editCheckbox.checked) {
-          editCheckbox.checked = false;
-          checkedEdit.delete(leadId);
-          const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
-          if (editBtn) editBtn.disabled = true;
-        }
-        teleconsultationSelections.set(leadId, 'false');
-      } else {
-        // No selection, revert checkbox
-        if (checkboxElement) {
-          checkboxElement.checked = originalState;
-        }
-      }
-      
-      console.log(`Teleconsultation for lead ${leadId} set to ${selectedValue}`);
-      closeModal();
-    });
-    
-    modal.classList.add('active');
+    </div>
+  `;
+  
+  const existingModal = document.getElementById("teleconsultationModal");
+  if (existingModal) existingModal.remove();
+  
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  
+  const modal = document.getElementById("teleconsultationModal");
+  const closeBtn = document.getElementById("closeTeleModal");
+  const cancelBtn = document.getElementById("cancelTeleModal");
+  const updateBtn = document.getElementById("updateTeleconsultation");
+  const selectEl = document.getElementById("teleconsultationSelect");
+  
+  const closeModal = () => {
+    modal.classList.remove('active');
+    setTimeout(() => modal.remove(), 300);
+    if (checkboxElement && !selectEl?.value) {
+      checkboxElement.checked = originalState;
+    }
+  };
+  
+  closeBtn?.addEventListener('click', closeModal);
+  cancelBtn?.addEventListener('click', closeModal);
+  modal?.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  
+  updateBtn?.addEventListener('click', async () => {
+  const selectedValue = selectEl?.value;
+  
+  if (!selectedValue) {
+    showToast("Bitte wählen Sie eine Option", "error", 2000);
+    return;
   }
+  
+  updateBtn.disabled = true;
+  updateBtn.textContent = "Wird aktualisiert...";
+  
+  try {
+    const payload = buildLeadUpdatePayload(lead, {
+      id: String(lead.id),
+      lead_id: String(lead.id),
+      erstberatung_telefon: selectedValue === 'true' ? "WAHR" : "FALSCH",
+    });
+    
+    console.log("Updating erstberatung_telefon:", payload);
+    
+    const response = await updateLeadOnAPI(lead.id, payload);
+    console.log("Update response:", response);
+
+    const rowsUpdated = Number(response?.rows_updated);
+    if (Number.isFinite(rowsUpdated) && rowsUpdated === 0) {
+      console.warn("Erstberatung Telefon update returned rows_updated: 0", payload);
+    }
+
+    const normalizedErstberatung =
+      selectedValue === 'true' ? "WAHR" : "FALSCH";
+
+    if (selectedValue === 'true') {
+      lead.erstberatung_telefon = normalizedErstberatung;
+      syncEditPermissionState(leadId, true);
+      teleconsultationSelections.set(String(leadId), 'true');
+      queuePendingUpdate(lead.id, { erstberatung_telefon: normalizedErstberatung });
+      showToast(`Erstberatung Telefon wurde auf WAHR gesetzt f?r ${lead.name}`, "success", 3000);
+    } else if (selectedValue === 'false') {
+      lead.erstberatung_telefon = normalizedErstberatung;
+      syncEditPermissionState(leadId, false);
+      teleconsultationSelections.set(String(leadId), 'false');
+      queuePendingUpdate(lead.id, { erstberatung_telefon: normalizedErstberatung });
+      showToast(`Erstberatung Telefon wurde auf FALSCH gesetzt f?r ${lead.name}`, "success", 3000);
+    }
+
+    // Log activity
+    const actor = resolveActivityActor(lead.bearbeiter);
+    const activityText = `${actor} hat Erstberatung Telefon auf ${selectedValue === 'true' ? 'WAHR' : 'FALSCH'} gesetzt für ${lead.name}`;
+    
+    addOptimisticActivity(lead.id, {
+      text: activityText,
+      by: actor,
+      at: new Date().toLocaleString(),
+    });
+    
+    try {
+      await insertActivity(lead.id, "update", activityText, {
+        from: actor,
+        bearbeiter: actor,
+        leadName: lead.name,
+      });
+      console.log("Activity recorded for erstberatung_telefon update");
+    } catch (e) {
+      console.warn("Activity log failed:", e);
+    }
+    
+    // Refresh the table without full reload to preserve state
+    renderKunden();
+    
+    closeModal();
+    
+  } catch (err) {
+    console.error("Update failed:", err);
+    showToast(err.message || "Aktualisierung fehlgeschlagen", "error", 3000);
+    
+    // Reset checkbox to original state on error
+    if (checkboxElement) {
+      checkboxElement.checked = originalState;
+    }
+  } finally {
+    updateBtn.disabled = false;
+    updateBtn.textContent = "Aktualisierung Erstberatung Telefon";
+  }
+});
+  
+  modal.classList.add('active');
+}
 
   window.openEditStatusModal = openEditStatusModal;
 
@@ -1341,23 +2517,48 @@ const kundenPage = (function () {
       }
       .mass-email-btn:hover { background: #16a34a; }
       .mass-email-btn svg { stroke: white; }
-      .table-wrap { overflow-x: auto; background: white; border-radius: 16px; border: 1px solid #eef2f8; }
-      #kunden-table { width: 100%; border-collapse: collapse; min-width: 1400px; }
-      #kunden-table th { text-align: left; padding: 13px 10px; background: #f8fafc; color: #475569; font-weight: 600; font-size: 0.78rem; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
-      #kunden-table td { padding: 11px 10px; border-bottom: 1px solid #f1f5f9; font-size: 0.83rem; vertical-align: middle; }
+      .table-wrap { overflow-x: visible; background: white; border-radius: 16px; border: 1px solid #eef2f8; width: 100%; }
+      #kunden-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      #kunden-table th, #kunden-table td { padding: 11px 8px; vertical-align: middle; }
+      #kunden-table th { text-align: left; background: #f8fafc; color: #475569; font-weight: 600; font-size: 0.78rem; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+      #kunden-table td { font-size: 0.83rem; border-bottom: 1px solid #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #kunden-table tr:hover { background: #f8fafc; }
-      .cb { width: 16px; height: 16px; cursor: pointer; accent-color: #22c55e; }
-      .expand-btn { background: none; border: none; cursor: pointer; padding: 3px 6px; color: #94a3b8; }
+      
+      /* Column widths */
+      #kunden-table th:nth-child(1), #kunden-table td:nth-child(1) { width: 34px; }
+      #kunden-table th:nth-child(2), #kunden-table td:nth-child(2) { width: 34px; }
+      #kunden-table th:nth-child(3), #kunden-table td:nth-child(3) { width: 140px; }
+      #kunden-table th:nth-child(4), #kunden-table td:nth-child(4) { width: 100px; }
+      #kunden-table th:nth-child(5), #kunden-table td:nth-child(5) { width: 100px; }
+      #kunden-table th:nth-child(6), #kunden-table td:nth-child(6) { width: 85px; }
+      #kunden-table th:nth-child(7), #kunden-table td:nth-child(7) { width: 85px; }
+      #kunden-table th:nth-child(8), #kunden-table td:nth-child(8) { width: 60px; text-align: center; }
+      #kunden-table th:nth-child(9), #kunden-table td:nth-child(9) { width: 85px; text-align: right; }
+      #kunden-table th:nth-child(10), #kunden-table td:nth-child(10) { width: 82px; }
+      #kunden-table th:nth-child(11), #kunden-table td:nth-child(11) { width: 60px; text-align: center; }
+      #kunden-table th:nth-child(12), #kunden-table td:nth-child(12) { width: 100px; }
+      #kunden-table th:nth-child(13), #kunden-table td:nth-child(13) { width: 85px; }
+      #kunden-table th:nth-child(14), #kunden-table td:nth-child(14) { width: 60px; text-align: center; }
+      
+      .cb { width: 16px; height: 16px; cursor: pointer; accent-color: #22c55e; margin: 0; }
+      .expand-btn { background: none; border: none; cursor: pointer; padding: 3px 6px; color: #94a3b8; display: inline-flex; align-items: center; justify-content: center; }
       .expand-btn.open svg { transform: rotate(90deg); }
-      .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 500; }
+      .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 500; white-space: nowrap; }
       .badge-follow { background: #dbeafe; color: #1e40af; }
       .badge-offen  { background: #fef3c7; color: #92400e; }
       .badge-info   { background: #e0e7ff; color: #4338ca; }
       .badge-beauft { background: #dcfce7; color: #166534; }
       .badge-bearbeitung { background: #fed7aa; color: #9a3412; }
-      .tag { display: inline-block; padding: 3px 8px; background: #f1f5f9; border-radius: 12px; font-size: 0.72rem; }
-      .assignee-chip { display: inline-block; padding: 3px 10px; background: #eef2ff; border-radius: 20px; font-size: 0.72rem; font-weight: 500; color: #4f46e5; }
-      .amount { font-weight: 600; color: #0f172a; }
+      .tag { display: inline-block; padding: 3px 8px; background: #f1f5f9; border-radius: 12px; font-size: 0.72rem; white-space: nowrap; }
+      .assignee-chip { display: inline-block; padding: 3px 10px; background: #eef2ff; border-radius: 20px; font-size: 0.72rem; font-weight: 500; color: #4f46e5; white-space: nowrap; }
+      .delegate-dot {     display: inline-block;
+    padding: 3px 8px;
+    background: #eef2ff;
+    border-radius: 16px;
+    font-size: 0.65rem;
+    font-weight: 500;
+ border-radius: 20px; background: #f1f5f9; border: 1px solid #e2e8f0; margin: 0 auto; }
+      .amount { font-weight: 600; color: #0f172a; white-space: nowrap; }
       .date-cell { color: #64748b; font-size: 0.75rem; white-space: nowrap; }
       .act-btn { background: none; border: none; cursor: pointer; padding: 5px 7px; border-radius: 7px; color: #64748b; transition: all 0.18s; display: inline-flex; align-items: center; justify-content: center; }
       .act-btn:hover { background: #f1f5f9; color: #3b82f6; }
@@ -1365,24 +2566,23 @@ const kundenPage = (function () {
       .act-btn-green:hover { background: #16a34a; }
       .act-btn-email { background: #3b82f6; border: none; cursor: pointer; padding: 7px 9px; border-radius: 9px; color: white; display: inline-flex; align-items: center; justify-content: center; }
       .act-btn-email:hover { background: #2563eb; }
-      .act-btn-outline { background: none; border: 1.5px solid #e2e8f0; cursor: pointer; padding: 5px 7px; border-radius: 7px; color: #94a3b8; display: inline-flex; align-items: center; justify-content: center; }
-      .act-btn-outline:hover { background: #f1f5f9; color: #22c55e; border-color: #22c55e; }
       .act-btn-green-outline { background: none; border: 1.5px solid #22c55e; cursor: pointer; padding: 5px 7px; border-radius: 7px; color: #22c55e; display: inline-flex; align-items: center; justify-content: center; }
       .act-btn-green-outline:hover { background: #22c55e10; }
-      .bearbeiten-cell { display: flex; align-items: center; gap: 6px; }
-      .edit-cb { width: 15px; height: 15px; cursor: pointer; accent-color: #22c55e; }
+      .bearbeiten-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+      .edit-cb { width: 15px; height: 15px; cursor: pointer; accent-color: #22c55e; margin: 0; }
       .edit-icon-btn { background: none; border: none; cursor: pointer; padding: 4px; border-radius: 6px; color: #64748b; display: inline-flex; align-items: center; transition: all 0.18s; }
       .edit-icon-btn:hover:not(:disabled) { background: #f1f5f9; color: #3b82f6; }
       .edit-icon-btn:disabled { color: #d1d5db; cursor: not-allowed; }
       .expand-row { display: none; background: #f9fafb; }
       .expand-row.open { display: table-row; }
-      .expand-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px; }
+      .expand-row td { padding: 0 !important; }
+      .expand-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px; background: #f9fafb; }
       .expand-item { display: flex; flex-direction: column; }
       .expand-item label { font-size: 0.7rem; color: #64748b; margin-bottom: 3px; }
       .expand-item span { font-size: 0.83rem; font-weight: 500; color: #0f172a; }
       .k-modal-overlay { display: none; position: fixed; z-index:9999; inset: 0; background: rgba(0,0,0,0.45); justify-content: center; align-items: center; }
       .k-modal-overlay.active { display: flex; }
-      .k-modal-content { background: white; border-radius: 20px; width: 90%; max-width: 650px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: kmodalIn 0.2s ease; }
+      .k-modal-content { background: white; border-radius: 20px; width: 90%; max-width: 750px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: kmodalIn 0.2s ease; }
       .k-modal-sm { max-width: 460px; }
       @keyframes kmodalIn { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: translateY(0); } }
       .k-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
@@ -1408,10 +2608,25 @@ const kundenPage = (function () {
       .timeline-icon { width: 32px; height: 32px; background: #f1f5f9; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
       .timeline-content { flex: 1; }
       .timeline-text { font-size: 0.85rem; color: #0f172a; margin-bottom: 4px; }
-      .timeline-meta { display: flex; gap: 12px; font-size: 0.7rem; color: #64748b; }
+      .timeline-meta { display: flex; flex-direction: column; gap: 12px; font-size: 0.7rem; color: #64748b; }
+      .timeline-activity{display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #475569;}
+      .timeline-activity-date{display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #475569;}
       .timeline-author { font-weight: 500; }
       .timeline-date { color: #94a3b8; }
-      @media (max-width: 768px) { .expand-grid { grid-template-columns: repeat(2, 1fr); } .k-modal-content { width: 96%; } .filter-section { flex-direction: column; align-items: stretch; } .filter-group select, .filter-group input { width: 100%; } .filter-actions { margin-left: 0; } }
+      
+      @media (max-width: 1200px) {
+        #kunden-table th, #kunden-table td { white-space: normal; word-break: break-word; }
+        .expand-grid { grid-template-columns: repeat(2, 1fr); }
+      }
+      @media (max-width: 768px) { 
+        .expand-grid { grid-template-columns: repeat(1, 1fr); } 
+        .k-modal-content { width: 96%; } 
+        .filter-section { flex-direction: column; align-items: stretch; } 
+        .filter-group select, .filter-group input { width: 100%; } 
+        .filter-actions { margin-left: 0; }
+        .table-wrap { overflow-x: auto; }
+        #kunden-table { min-width: 800px; }
+      }
     `;
     document.head.appendChild(s);
   }
@@ -1434,6 +2649,22 @@ const kundenPage = (function () {
           <div class="filter-group">
             <label>Ort</label>
             <input type="text" id="filter-ort" placeholder="Ort suchen..." oninput="window.applyFilters()" />
+          </div>
+          <div class="filter-group">
+            <label>Bearbeiter</label>
+            <select id="filter-bearbeiter" onchange="window.applyFilters()">
+              <option value="">Alle Bearbeiter</option>
+              <option value="Philipp">Philipp</option>
+              <option value="Martin">Martin</option>
+              <option value="André">André</option>
+              <option value="Simon">Simon</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Delegieren</label>
+            <select id="filter-delegieren" onchange="window.applyFilters()">
+              <option value="">Alle Delegieren</option>
+            </select>
           </div>
           <div class="filter-actions">
             <button class="reset-filter-btn" onclick="window.resetFilters()">Filter zurücksetzen</button>
@@ -1532,7 +2763,6 @@ const kundenPage = (function () {
 
     loadAllData();
 
-    // Expose filter functions globally
     window.applyFilters = () => {
       applyFilters();
     };
@@ -1585,7 +2815,7 @@ const kundenPage = (function () {
       .getElementById("statusModalSaveBtn")
       ?.addEventListener("click", saveStatusUpdate);
 
-    console.log("✅ Kunden page loaded with filters, teleconsultation, and 3CX phone integration");
+    console.log("✅ Kunden page loaded with full API integration (UPDATE, ACTIVITY, NOTES)");
   }
 
   return { init };
@@ -1593,4 +2823,7 @@ const kundenPage = (function () {
 
 window.kundenPage = kundenPage;
 window.customersPage = window.kundenPage;
-console.log("kunden.js loaded - window.kundenPage exists with filters, teleconsultation and 3CX phone integration");
+console.log("kunden.js loaded - window.kundenPage exists with full API integration");
+
+
+
