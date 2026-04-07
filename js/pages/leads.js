@@ -1117,6 +1117,8 @@
   const NOTES_INSERT_SAME = "/api/insert_lead_note";
   const ACTIVITY_FETCH_SAME = "/api/lead_activity";
   const SAME_ORIGIN_API = "/api/leads";
+  const BULK_EMAIL_WEBHOOK_URL =
+    "https://msdach.app.n8n.cloud/webhook/send_bulk_emails";
 
   // ─────────────────────────────────────────────
   // ERROR HELPERS (friendlier messages)
@@ -1908,6 +1910,44 @@ async function updateLeadOnAPI(id, payload) {
 
   let currentEmailLeadId = null;
 
+  async function triggerBulkEmailWebhook({ emails, names, action, source }) {
+    const payload = {
+      emails: emails.join(","),
+      names: names.join(","),
+      action: action || "",
+      source: source || "",
+    };
+    const params = new URLSearchParams(payload);
+    console.log("Bulk email webhook payload:", payload);
+
+    const webhookUrl = `${BULK_EMAIL_WEBHOOK_URL}?${params.toString()}`;
+    console.log("Bulk email webhook URL:", webhookUrl);
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const responseText = await response.text();
+
+      console.log("Bulk email webhook status:", response.status, response.statusText);
+      console.log("Bulk email webhook response:", responseText);
+
+      if (!response.ok) {
+        throw new Error(`Webhook HTTP ${response.status}: ${responseText}`);
+      }
+
+      return {
+        success: true,
+        status: response.status,
+        responseText,
+      };
+    } catch (error) {
+      console.warn("Bulk email webhook failed:", error);
+      throw new Error(error.message || "Bulk email webhook call fehlgeschlagen");
+    }
+  }
+
   function openMassEmailModal(lead = null) {
     // If opened for a specific lead (from row action), allow opening without selection
     // Otherwise require selected leads
@@ -1947,7 +1987,7 @@ async function updateLeadOnAPI(id, payload) {
     if (modal) modal.classList.add("active");
   }
 
-  function sendMassEmails() {
+  async function sendMassEmails() {
     const selectedEmailTemplate = document.getElementById(
       "emailTemplateSelect",
     )?.value;
@@ -1996,81 +2036,47 @@ async function updateLeadOnAPI(id, payload) {
       return;
     }
 
-    const templateContent = {
-      E1: {
-        subject: `${subjectText} - E1`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E1.\n\nViele Grüße",
-      },
-      E2: {
-        subject: `${subjectText} - E2`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E2.\n\nViele Grüße",
-      },
-      E3: {
-        subject: `${subjectText} - E3`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E3.\n\nViele Grüße",
-      },
-      E4: {
-        subject: `${subjectText} - E4`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E4.\n\nViele Grüße",
-      },
-      E5: {
-        subject: `${subjectText} - E5`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E5.\n\nViele Grüße",
-      },
-      E6: {
-        subject: `${subjectText} - E6`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E6.\n\nViele Grüße",
-      },
-      E7: {
-        subject: `${subjectText} - E7`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E7.\n\nViele Grüße",
-      },
-      E8: {
-        subject: `${subjectText} - E8`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E8.\n\nViele Grüße",
-      },
-      E9: {
-        subject: `${subjectText} - E9`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E9.\n\nViele Grüße",
-      },
-      E10: {
-        subject: `${subjectText} - E10`,
-        body: "Hallo,\n\nhier ist E-Mail Vorlage E10.\n\nViele Grüße",
-      },
-    };
-
-    const selectedTemplateContent = templateContent[selectedEmailTemplate];
-    if (!selectedTemplateContent) {
+    if (!/^E(?:10|[1-9])$/.test(selectedEmailTemplate)) {
       showToast("Ungültige E-Mail-Vorlage", "error", 2200);
       return;
     }
 
     const recipients = leadsWithEmails.map((item) => item.email.trim());
-    const composeBaseUrl = "https://hex2013.com/owa/?path=/mail/action/compose";
-    const params = new URLSearchParams();
-
-    if (recipients.length === 1) {
-      params.set("to", recipients[0]);
-    } else {
-      params.set("bcc", recipients.join(";"));
-    }
-
-    params.set("subject", selectedTemplateContent.subject);
-    params.set("body", selectedTemplateContent.body);
-
-    const composeUrl = `${composeBaseUrl}&${params.toString()}`;
-    const composeWindow = window.open(composeUrl, "_blank");
-    if (!composeWindow) {
-      showToast("E-Mail-Fenster konnte nicht geöffnet werden", "error", 2600);
-      return;
-    }
-
-    document.getElementById("massEmailModal")?.classList.remove("active");
-    showToast(
-      `E-Mail-Fenster für ${leadsWithEmails.length} Empfänger geöffnet`,
-      "success",
-      3000,
+    const recipientNames = leadsWithEmails.map((item) =>
+      String(item.name || subjectText || "").trim(),
     );
+    const source = resolveActivityActor(currentBearbeiter);
+    const sendBtn = document.getElementById("sendMassEmailBtn");
+    const originalText = sendBtn?.textContent || "E-Mail senden";
+
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.textContent = "Wird gesendet...";
+    }
+
+    try {
+      const webhookResult = await triggerBulkEmailWebhook({
+        emails: recipients,
+        names: recipientNames,
+        action: selectedEmailTemplate,
+        source,
+      });
+
+      console.log("Bulk email webhook success:", webhookResult);
+      document.getElementById("massEmailModal")?.classList.remove("active");
+      showToast(
+        `${selectedEmailTemplate} bulk email ${recipients.length} Empfänger ko send trigger ho gaya`,
+        "success",
+        3000,
+      );
+    } catch (error) {
+      showToast(error.message || "Bulk email send fehlgeschlagen", "error", 3000);
+    } finally {
+      if (sendBtn) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = originalText;
+      }
+    }
   }
 
   // ─────────────────────────────────────────────

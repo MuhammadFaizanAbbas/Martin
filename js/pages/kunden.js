@@ -19,6 +19,8 @@ const kundenPage = (function () {
   const UPDATE_API_SAME = "/api/update_lead";
   const UPDATE_API_PROXY = `https://corsproxy.io/?${encodeURIComponent(UPDATE_API_DIRECT)}`;
   const UPDATE_API_ALT_PROXY = `https://api.allorigins.win/raw?url=${encodeURIComponent(UPDATE_API_DIRECT)}`;
+  const BULK_EMAIL_WEBHOOK_URL =
+    "https://msdach.app.n8n.cloud/webhook/send_bulk_emails";
 
   // Add these lines near other API URLs (around line 20-30)
 const INSERT_ACTIVITY_API = "/api/insert_activity";
@@ -1418,6 +1420,48 @@ function protectFilterDropdowns() {
     }
   }
 
+  async function triggerBulkEmailWebhook({ emails, names, action, source }) {
+    const payload = {
+      emails: emails.join(","),
+      names: names.join(","),
+      action: action || "",
+      source: source || "",
+    };
+    const params = new URLSearchParams(payload);
+    const webhookUrl = `${BULK_EMAIL_WEBHOOK_URL}?${params.toString()}`;
+
+    console.log("Kunden bulk email webhook payload:", payload);
+    console.log("Kunden bulk email webhook URL:", webhookUrl);
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const responseText = await response.text();
+
+      console.log(
+        "Kunden bulk email webhook status:",
+        response.status,
+        response.statusText,
+      );
+      console.log("Kunden bulk email webhook response:", responseText);
+
+      if (!response.ok) {
+        throw new Error(`Webhook HTTP ${response.status}: ${responseText}`);
+      }
+
+      return {
+        success: true,
+        status: response.status,
+        responseText,
+      };
+    } catch (error) {
+      console.warn("Kunden bulk email webhook failed:", error);
+      throw new Error(error.message || "Bulk email webhook call fehlgeschlagen");
+    }
+  }
+
   function openMassEmailModal() {
     if (selectedKunden.size === 0) return;
     
@@ -1496,7 +1540,7 @@ function protectFilterDropdowns() {
       if (e.target === modal) closeModal();
     });
     
-    sendBtn?.addEventListener('click', () => {
+    sendBtn?.addEventListener('click', async () => {
       const selectedTemplate = document.getElementById("email-template-select")?.value || "";
       const validEmailData = selectedLeads
         .map((lead) => ({
@@ -1515,6 +1559,47 @@ function protectFilterDropdowns() {
       if (!validEmailData.length) {
         showToast("Keine gültigen E-Mail-Adressen vorhanden", "error", 2200);
         return;
+      }
+
+      const webhookRecipients = validEmailData.map((item) => item.email);
+      const webhookRecipientNames = validEmailData.map((item) => item.name);
+      const source = resolveActivityActor(selectedLeads[0]?.bearbeiter || "");
+      const originalText = sendBtn.textContent || "E-Mail senden";
+
+      if (!/^E(?:10|[1-9])$/.test(selectedTemplate)) {
+        showToast("UngÃ¼ltige E-Mail-Vorlage", "error", 2200);
+        return;
+      }
+
+      sendBtn.disabled = true;
+      sendBtn.textContent = "Wird gesendet...";
+
+      try {
+        const webhookResult = await triggerBulkEmailWebhook({
+          emails: webhookRecipients,
+          names: webhookRecipientNames,
+          action: selectedTemplate,
+          source,
+        });
+
+        console.log("Kunden bulk email webhook success:", webhookResult);
+        showToast(
+          `${selectedTemplate} bulk email ${validEmailData.length} EmpfÃ¤nger ko send trigger ho gaya`,
+          "success",
+          3000,
+        );
+        closeModal();
+        return;
+      } catch (error) {
+        showToast(
+          error.message || "Bulk email send fehlgeschlagen",
+          "error",
+          3000,
+        );
+        return;
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = originalText;
       }
 
       const templateContent = {
