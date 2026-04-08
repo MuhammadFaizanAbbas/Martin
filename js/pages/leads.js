@@ -130,7 +130,7 @@
               <th>Status</th>
               <th>Lead Quelle</th>
               <th>Bearbeiter</th>
-              <th>Kategorien</th>
+
               <th>Delegieren</th>
               <th>Summe Netto</th>
               <th>Datum</th>
@@ -138,7 +138,7 @@
               </tr>
           </thead>
           <tbody id="leads-tbody">
-            <tr><td colspan="12"><div class="empty-state loading-state">⏳ Daten werden geladen...</div></td></tr>
+            <tr><td colspan="11"><div class="empty-state loading-state">⏳ Daten werden geladen...</div></td></tr>
           </tbody>
         </table>
       </div>
@@ -437,21 +437,21 @@
       .table-label-head { margin: 12px 0; font-size: 0.8rem; color: #64748b;    display: flex;
     align-items: center;
     justify-content: space-between; }
-      .table-wrap {  background: white; border-radius: 16px; border: 1px solid #eef2f8; scrollbar-gutter: stable; }
+      .table-wrap { overflow-x: hidden; background: white; border-radius: 16px; border: 1px solid #eef2f8;  }
       #leads-table { width: 100%; border-collapse: collapse; min-width: auto; table-layout: fixed; }
       #leads-table th { text-align: left; padding: 9px 6px; background: #f8fafc; color: #475569; font-weight: 600; font-size: 0.75rem; border-bottom: 1px solid #e2e8f0; white-space: nowrap; vertical-align: middle; }
       #leads-table td { padding: 8px 4px; border-bottom: 1px solid #f1f5f9; font-size: 0.78rem; line-height: 1.35; vertical-align: middle; overflow-wrap: anywhere; }
       #leads-table tr:hover td { background: #f8fafc; }
-      #leads-table th:nth-child(1), #leads-table td:nth-child(1) { width: 34px; }
-      #leads-table th:nth-child(2), #leads-table td:nth-child(2) { width: 34px; }
-      #leads-table th:nth-child(3), #leads-table td:nth-child(3) { width: 100px; padding-right: 3px; }
-      #leads-table th:nth-child(4), #leads-table td:nth-child(4) { width: 70px; padding-left: 3px; }
-      #leads-table th:nth-child(5), #leads-table td:nth-child(5) { width: 92px; }
-      #leads-table th:nth-child(6), #leads-table td:nth-child(6) { width: 78px; }
-      #leads-table th:nth-child(7), #leads-table td:nth-child(7) { width: 78px; }
-      #leads-table th:nth-child(8), #leads-table td:nth-child(8) { width: 80px; }
-      #leads-table th:nth-child(9), #leads-table td:nth-child(9) { width: 70px; text-align: center; }
-      #leads-table th:nth-child(10), #leads-table td:nth-child(10) { width: 78px; }
+      #leads-table th:nth-child(1), #leads-table td:nth-child(1) { width: 15px; }
+      #leads-table th:nth-child(2), #leads-table td:nth-child(2) { width: 15px; }
+      #leads-table th:nth-child(3), #leads-table td:nth-child(3) { width: 80px;  }
+      #leads-table th:nth-child(4), #leads-table td:nth-child(4) { width: 70px; }
+      #leads-table th:nth-child(5), #leads-table td:nth-child(5) { width: 50px; }
+      #leads-table th:nth-child(6), #leads-table td:nth-child(6) { width: 50px; }
+      #leads-table th:nth-child(7), #leads-table td:nth-child(7) { width: 50px; }
+      #leads-table th:nth-child(8), #leads-table td:nth-child(8) { width: 40px; }
+      #leads-table th:nth-child(9), #leads-table td:nth-child(9) { width: 60px; text-align: center; }
+      #leads-table th:nth-child(10), #leads-table td:nth-child(10) { width: 60px; }
       #leads-table th:nth-child(11), #leads-table td:nth-child(11) { width: 82px; }
       #leads-table th:nth-child(12), #leads-table td:nth-child(12) { width: 152px; }
       .cb { width: 16px; height: 16px; cursor: pointer; }
@@ -668,7 +668,8 @@
       }
 
       @media (max-width: 768px) {
-        #leads-table { min-width: 860px; table-layout: auto; }
+        .table-wrap { overflow-x: hidden; }
+        #leads-table { min-width: 100%; table-layout: fixed; }
       }
 
       /* Activity timeline */
@@ -981,7 +982,7 @@
   async function refreshLeads() {
     const tbody = document.getElementById("leads-tbody");
     if (tbody)
-      tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state loading-state">⏳ Lade Daten...</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state loading-state">⏳ Lade Daten...</div></td></tr>`;
     fullLeadsData = [];
     expandedRows.clear();
     selectedLeads.clear();
@@ -1054,21 +1055,53 @@
     return "badge-offen";
   }
 
+  function firstNonEmpty(...values) {
+    for (const value of values) {
+      const normalized = String(value ?? "").trim();
+      if (normalized && normalized !== "—" && normalized !== "null") {
+        return normalized;
+      }
+    }
+    return "";
+  }
+
+  function extractLeadList(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== "object") return [];
+    return payload.data || payload.leads || payload.items || payload.results || [];
+  }
+
   function mapAPIToLead(apiLead) {
-    const status = apiLead.status || "Offen";
+    const status = firstNonEmpty(apiLead.status, apiLead.lead_status) || "Offen";
+    const quelle =
+      firstNonEmpty(apiLead.lead_quelle, apiLead.quelle, apiLead.source) || "—";
+    const bearbeiter =
+      firstNonEmpty(apiLead.bearbeiter, apiLead.owner, apiLead.assignee) || "—";
+    const delegieren =
+      firstNonEmpty(apiLead.delegieren, apiLead.delegate, apiLead.delegated_to) ||
+      "—";
+    const kategorie =
+      firstNonEmpty(apiLead.kategorie, apiLead.sale_typ, apiLead.sales_typ) || "—";
+    const netto =
+      firstNonEmpty(
+        apiLead.summe_netto,
+        apiLead.summe,
+        apiLead.total_netto,
+        apiLead.total,
+      ) || "0.00";
+
     return {
       id: apiLead.id,
       name: apiLead.name || "—",
       ort: apiLead.ort || "—",
       status,
       statusClass: getStatusClass(status),
-      quelle: apiLead.lead_quelle || "—",
-      bearbeiter: apiLead.bearbeiter || "—",
-      delegieren: apiLead.delegieren || "—",
-      kategorie: apiLead.sale_typ || "—",
+      quelle,
+      bearbeiter,
+      delegieren,
       summe:
-        apiLead.summe_netto && apiLead.summe_netto !== "0.00"
-          ? `$ ${formatNumber(apiLead.summe_netto)}`
+        netto !== "0.00"
+          ? `$ ${formatNumber(netto)}`
           : "$ 0,00",
       datum: apiLead.created_at
         ? apiLead.created_at.split(" ")[0]
@@ -1186,7 +1219,7 @@
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (!data || !Array.isArray(data.data))
+      if (!extractLeadList(data).length && !Array.isArray(data?.data))
         throw new Error("Invalid response format");
       console.log("✅ Same-origin API success");
       return data;
@@ -1225,7 +1258,7 @@
       });
       if (!directResponse.ok) throw new Error(`HTTP ${directResponse.status}`);
       const directData = await directResponse.json();
-      if (!directData || !Array.isArray(directData.data))
+      if (!extractLeadList(directData).length && !Array.isArray(directData?.data))
         throw new Error("Invalid response format");
       console.log("✅ Direct request success");
       return directData;
@@ -1366,8 +1399,7 @@ async function updateLeadOnAPI(id, payload) {
     dachpfanne: payload.dachpfanne,
     baujahr_dach: payload.baujahr_dach,
     zusaetzliche_extras: payload.zusaetzliche_extras,
-    kategorie: payload.kategorie,
-  };
+ };
 
   Object.keys(mappedPayload).forEach((key) => {
     if (mappedPayload[key] === undefined || mappedPayload[key] === null) {
@@ -1479,7 +1511,7 @@ async function updateLeadOnAPI(id, payload) {
   function showLeadsLoadError(message) {
     const tbody = document.getElementById("leads-tbody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state error-state">⚠️ ${message}</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state error-state">⚠️ ${message}</div></td></tr>`;
   }
 
   // ─────────────────────────────────────────────
@@ -1755,14 +1787,14 @@ async function updateLeadOnAPI(id, payload) {
 
     const tbody = document.getElementById("leads-tbody");
     if (tbody && fullLeadsData.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state loading-state">⏳ Lade Daten...</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state loading-state">⏳ Lade Daten...</div></td></tr>`;
     }
 
     try {
       // Only fetch if we don't have data yet
       if (fullLeadsData.length === 0) {
         const result = await fetchLeadsFromAPI();
-        fullLeadsData = mergeAfterFetch(result.data.map(mapAPIToLead));
+        fullLeadsData = mergeAfterFetch(extractLeadList(result).map(mapAPIToLead));
       } else {
         // Ensure dataset reflects optimistic cache as well
         fullLeadsData = mergeAfterFetch(fullLeadsData);
@@ -1798,7 +1830,7 @@ async function updateLeadOnAPI(id, payload) {
     if (!tbody) return;
 
     if (!data.length) {
-      tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state">Keine Leads gefunden.</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">Keine Leads gefunden.</div></td></tr>`;
       updateSelectedCount();
       return;
     }
@@ -1820,7 +1852,6 @@ async function updateLeadOnAPI(id, payload) {
         <td><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></td>
         <td><span class="tag">${escapeHtml(lead.quelle)}</span></td>
         <td><span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span></td>
-        <td><span class="tag">${escapeHtml(lead.kategorie || "—")}</span></td>
         <td><div class="delegate-dot" >${escapeHtml(lead.delegieren || "—")}</div></td>
         
         <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
@@ -1851,7 +1882,7 @@ async function updateLeadOnAPI(id, payload) {
       const xtr = document.createElement("tr");
       xtr.className = `expand-row ${expandedRows.has(lead.id) ? "open" : ""}`;
       xtr.innerHTML = `
-        <td colspan="12">
+        <td colspan="11">
           <div class="expand-grid">
             <div class="expand-item"><label>Dachfläche</label><span>${escapeHtml(lead.dachflaeche || "—")}</span></div>
             <div class="expand-item"><label>Dacheindeckung</label><span>${escapeHtml(lead.dacheindeckung || "—")}</span></div>
@@ -2261,7 +2292,6 @@ async function updateLeadOnAPI(id, payload) {
     setFieldValue("editBaujahr", lead.baujahr || "");
     setFieldValue("editZusatzExtras", lead.zusatzExtras || "");
     setFieldValue("editSalesTyp", lead.salesTyp || "");
-    setFieldValue("editKategorie", lead.kategorie || "");
 
     openPanel("Lead bearbeiten");
   };
@@ -2286,6 +2316,7 @@ async function updateLeadOnAPI(id, payload) {
       <div class="view-detail-row"><div class="view-detail-label">Qualification</div><div class="view-detail-value">${escapeHtml(lead.qualification || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Lead Quelle</div><div class="view-detail-value">${escapeHtml(lead.quelle)}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Bearbeiter</div><div class="view-detail-value">${escapeHtml(lead.bearbeiter)}</div></div>
+      <div class="view-detail-row"><div class="view-detail-label">Delegieren</div><div class="view-detail-value">${escapeHtml(lead.delegieren || '—')}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Summe Netto</div><div class="view-detail-value">${escapeHtml(lead.summe)}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Angebot</div><div class="view-detail-value">${escapeHtml(lead.angebot || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Sales Typ</div><div class="view-detail-value">${escapeHtml(lead.salesTyp || "—")}</div></div>
@@ -2541,7 +2572,6 @@ async function updateLeadOnAPI(id, payload) {
       baujahr: val("editBaujahr"),
       zusatzExtras: val("editZusatzExtras"),
       salesTyp: val("editSalesTyp"),
-      kategorie: val("editKategorie"),
     };
   }
 
@@ -2752,7 +2782,7 @@ if (currentEditId) {
       baujahr_dach: data.baujahr,
       zusaetzliche_extras: data.zusatzExtras,
       sale_typ: data.salesTyp,
-      kategorie: data.kategorie,
+
     };
     
     showToast("Updating lead...", "info", 1000);
@@ -2807,7 +2837,7 @@ if (currentEditId) {
             baujahr_dach: data.baujahr,
             zusaetzliche_extras: data.zusatzExtras,
             sale_typ: data.salesTyp,
-            kategorie: data.kategorie,
+
           };
           // Hide panel immediately and add optimistic row
           closePanel();

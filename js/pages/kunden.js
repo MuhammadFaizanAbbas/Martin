@@ -1048,6 +1048,24 @@ async function fetchActivityForLead(leadId) {
     return {};
   }
 
+  async function refreshLeadsData(options = {}) {
+    const { showLoading = false } = options;
+    const tbody = document.getElementById("kunden-tbody");
+
+    if (showLoading && tbody) {
+      tbody.innerHTML = `<td colspan="14"><div class="empty-state">â³ Daten werden geladen...</div>`;
+    }
+
+    const leads = await fetchLeads();
+    leadsData = leads;
+    fullLeadsData = leads;
+    populateFilterOptions();
+    protectFilterDropdowns();
+    saveJsonCache(KUNDEN_LEADS_CACHE_KEY, leads);
+    renderKunden();
+    return leads;
+  }
+
  async function loadAllData() {
   if (isLoading) return;
   isLoading = true;
@@ -1057,14 +1075,7 @@ async function fetchActivityForLead(leadId) {
     tbody.innerHTML = `<td colspan="14"><div class="empty-state">⏳ Daten werden geladen...</div>`;
   }
 
-  fetchLeads()
-    .then((leads) => {
-      leadsData = leads;
-      fullLeadsData = leads;
-      populateFilterOptions();
-      protectFilterDropdowns();  // Add this line here
-      renderKunden();
-    })
+  refreshLeadsData()
     .catch((e) => {
       console.error("Leads load failed", e);
       if (tbody) {
@@ -1286,8 +1297,38 @@ function protectFilterDropdowns() {
     });
   }
 
+  function normalizeStatusValue(status) {
+    return String(status || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+  }
+
+  function getCanonicalStatus(status) {
+    const normalized = normalizeStatusValue(status);
+    if (normalized === "follow up") return "follow up";
+    if (normalized === "offen") return "Offen";
+    if (normalized === "in bearbeitung") return "in Bearbeitung";
+    if (normalized === "nur info eingeholt" || normalized === "infos eingeholt") {
+      return "Nur Info eingeholt";
+    }
+    if (normalized === "beauftragung") return "Beauftragung";
+    if (normalized === "ea beauftragung" || normalized === "ea beauftragt") {
+      return "EA Beauftragung";
+    }
+    if (normalized === "nf beauftragung" || normalized === "nf beauftragt") {
+      return "NF Beauftragung";
+    }
+    return String(status || "").trim();
+  }
+
+  function getStatusCount(status) {
+    const target = getCanonicalStatus(status);
+    return leadsData.filter((lead) => getCanonicalStatus(lead.status) === target).length;
+  }
+
   function getStatusClass(status) {
-    const statusLower = (status || "").toLowerCase();
+    const statusLower = normalizeStatusValue(status);
     if (statusLower === "follow up") return "badge-follow";
     if (statusLower === "offen") return "badge-offen";
     if (
@@ -1306,7 +1347,7 @@ function protectFilterDropdowns() {
   }
 
   function isInBearbeitungStatus(status) {
-    return String(status || "").trim().toLowerCase() === "in bearbeitung";
+    return normalizeStatusValue(status) === "in bearbeitung";
   }
 
   function shouldShowPhoneIcon() {
@@ -1322,6 +1363,11 @@ function protectFilterDropdowns() {
   }
 
   function getStatDefinitions() {
+    const getCountOrFallback = (status, fallbackKey) => {
+      if (leadsData.length) return getStatusCount(status);
+      return dashboardStats[fallbackKey] || 0;
+    };
+
     return [
       {
         key: "offen",
@@ -1339,7 +1385,7 @@ function protectFilterDropdowns() {
       },
       {
         key: "followup",
-        label: "follow up",
+        label: "Follow up",
         icon: "📞",
         count: dashboardStats["follow up"] || 0,
         filter: (l) => l.status === "follow up",
@@ -2079,8 +2125,8 @@ function openEditStatusModal(leadId) {
                   <label>Sales Typ</label>
                   <select id="edit_salesTyp" class="k-full-select">
                     <option value="">Wählen...</option>
-                    <option value="Inbound" ${lead.salesTyp === 'Inbound' ? 'selected' : ''}>Inbound</option>
-                    <option value="Outbound" ${lead.salesTyp === 'Outbound' ? 'selected' : ''}>Outbound</option>
+                    <option value="Hoch" ${lead.salesTyp === 'Hoch' ? 'selected' : ''}>Hoch</option>
+                    <option value="Normal" ${lead.salesTyp === 'Normal' ? 'selected' : ''}>Normal</option>
                   </select>
                 </div>
                 
