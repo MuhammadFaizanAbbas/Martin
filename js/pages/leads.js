@@ -26,6 +26,7 @@
   // Optimistic cache until reload
   let pendingCreates = []; // Array of temp leads (ids are negative)
   let pendingUpdates = new Map(); // Map<id:string, partialLead>
+  const PENDING_KUNDEN_UPDATES_KEY = "kunden-pending-updates-v1";
 
   // Current filters
   let currentSearch = "";
@@ -171,11 +172,11 @@
           <div class="form-group"><label>ID</label><input type="text" id="editId" placeholder="—" readonly></div>
           <div class="form-group"><label>Salutation</label><select id="editSalutation"><option value="">Wählen...</option><option value="Herr">Herr</option><option value="Frau">Frau</option><option value="Divers">Divers</option></select></div>
           <div class="form-group"><label>Name *</label><input type="text" id="editName" placeholder="Geben Sie den Namen ein" required></div>
-          <div class="form-group"><label>Briefberatung Telefon</label>
+          <div class="form-group"><label>Erstberatung Telefon</label>
 <select id="editBriefberatungTelefon">
   <option value="">Wählen...</option>
-  <option value="Ja">FALSCH</option>
-  <option value="Nein">WAHR</option>
+  <option value="FALSCH">FALSCH</option>
+  <option value="WAHR">WAHR</option>
 </select>
           <div class="form-group"><label>Straße Objekt</label><input type="text" id="editStrasseObjekt" placeholder="Hausanschrift..."></div>
           <div class="form-group"><label>Angebot</label><input type="text" id="editAngebot" placeholder="Angebot eingeben"></div>
@@ -1010,11 +1011,53 @@
     });
   }
 
-  // Lightweight identity to dedupe pending creates once upstream reflects them
+  function normalizeLeadIdentityValue(value) {
+    const normalized = String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+    if (
+      !normalized ||
+      normalized === "—" ||
+      normalized === "-" ||
+      normalized === "null" ||
+      normalized === "undefined"
+    ) {
+      return "";
+    }
+
+    return normalized;
+  }
+
+  // Stronger identity so optimistic rows collapse into the real API row.
   function leadKey(lead) {
-    return [lead.name || "", lead.email || "", lead.telefon || ""]
-      .map((s) => String(s).trim().toLowerCase())
-      .join("|");
+    const name = normalizeLeadIdentityValue(lead?.name);
+    const email = normalizeLeadIdentityValue(lead?.email);
+    const telefon = normalizeLeadIdentityValue(lead?.telefon).replace(
+      /[^\d+]/g,
+      "",
+    );
+    const ort = normalizeLeadIdentityValue(lead?.ort);
+    const datum = normalizeLeadIdentityValue(lead?.datum);
+
+    if (name && (email || telefon)) {
+      return `contact|${name}|${email}|${telefon}`;
+    }
+
+    if (name && ort) {
+      return `location|${name}|${ort}|${datum}`;
+    }
+
+    if (name && datum) {
+      return `dated|${name}|${datum}`;
+    }
+
+    if (email || telefon) {
+      return `direct|${email}|${telefon}`;
+    }
+
+    return "";
   }
 
   function euro(amount) {
@@ -1033,11 +1076,56 @@
     });
   }
 
+  function dedupeLeads(list) {
+    const deduped = [];
+    const seen = new Map();
+
+    list.forEach((lead) => {
+      const key = leadKey(lead);
+      if (!key) {
+        deduped.push(lead);
+        return;
+      }
+
+      const existingIndex = seen.get(key);
+      if (existingIndex == null) {
+        seen.set(key, deduped.length);
+        deduped.push(lead);
+        return;
+      }
+
+      const existingLead = deduped[existingIndex];
+      const existingIsTemp = Number(existingLead?.id) < 0;
+      const incomingIsReal = Number(lead?.id) > 0;
+
+      if (existingIsTemp && incomingIsReal) {
+        deduped[existingIndex] = lead;
+      }
+    });
+
+    return deduped;
+  }
+
+  function removePendingCreate(tempId) {
+    pendingCreates = pendingCreates.filter((lead) => lead.id !== tempId);
+    fullLeadsData = fullLeadsData.filter((lead) => lead.id !== tempId);
+  }
+
   function mergeAfterFetch(baseList) {
     const withUpdates = applyPendingUpdates(baseList);
-    const serverKeys = new Set(withUpdates.map(leadKey));
-    const creates = pendingCreates.filter((pc) => !serverKeys.has(leadKey(pc)));
-    return [...creates, ...withUpdates];
+    const serverKeys = new Set(
+      withUpdates
+        .filter((lead) => Number(lead?.id) > 0)
+        .map(leadKey)
+        .filter(Boolean),
+    );
+
+    pendingCreates = pendingCreates.filter((pc) => {
+      const key = leadKey(pc);
+      return !key || !serverKeys.has(key);
+    });
+
+    return dedupeLeads([...pendingCreates, ...withUpdates]);
   }
 
   function getStatusClass(status) {
@@ -1069,6 +1157,31 @@
     if (Array.isArray(payload)) return payload;
     if (!payload || typeof payload !== "object") return [];
     return payload.data || payload.leads || payload.items || payload.results || [];
+  }
+
+  function normalizeBriefberatungTelefonValue(value) {
+    const normalized = String(value ?? "").trim().toUpperCase();
+    if (!normalized) return "";
+    if (normalized === "WAHR" || normalized === "JA" || normalized === "YES") {
+      return "WAHR";
+    }
+    if (normalized === "FALSCH" || normalized === "NEIN" || normalized === "NO") {
+      return "FALSCH";
+    }
+    return String(value ?? "").trim();
+  }
+
+  function pushKundenPendingUpdate(id, patch) {
+    try {
+      const raw = localStorage.getItem(PENDING_KUNDEN_UPDATES_KEY);
+      const existing = raw ? JSON.parse(raw) : {};
+      existing[String(id)] = {
+        ...(existing[String(id)] || {}),
+        ...patch,
+        _updatedAt: Date.now(),
+      };
+      localStorage.setItem(PENDING_KUNDEN_UPDATES_KEY, JSON.stringify(existing));
+    } catch {}
   }
 
   function mapAPIToLead(apiLead) {
@@ -1113,12 +1226,9 @@
           ? apiLead.nachfassen
           : "",
       salutation: apiLead.salutation || "",
-      briefberatungTelefon:
-        apiLead.erstberatung_telefon === "WAHR"
-          ? "Ja"
-          : apiLead.erstberatung_telefon === "FALSCH"
-            ? "Nein"
-            : "",
+      briefberatungTelefon: normalizeBriefberatungTelefonValue(
+        apiLead.erstberatung_telefon,
+      ),
       strasseObjekt: apiLead.strasse_objekt || "",
       angebot: apiLead.angebot || "",
       plz: apiLead.plz || "",
@@ -1206,28 +1316,35 @@
     );
   }
 
+  function shouldTrySameOriginApi() {
+    return !isStaticLocalHost();
+  }
+
   async function fetchLeadsFromAPI() {
     const cacheBust = `_ts=${Date.now()}`;
-    // 0) Try same-origin API first (works on Vercel)
-    try {
-      console.log(`🔄 Trying same-origin API: ${SAME_ORIGIN_API}`);
-      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
-      const sameOriginUrl = `${SAME_ORIGIN_API}?${cacheBust}`;
-      const res = await fetch(sameOriginUrl, {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (!extractLeadList(data).length && !Array.isArray(data?.data))
-        throw new Error("Invalid response format");
-      console.log("✅ Same-origin API success");
-      return data;
-    } catch (e) {
-      console.warn(
-        "⚠️ Same-origin API failed, falling back to proxies...",
-        e.message,
-      );
+    // 0) Try same-origin API first when environment supports /api routes
+    if (shouldTrySameOriginApi()) {
+      try {
+        console.log(`🔄 Trying same-origin API: ${SAME_ORIGIN_API}`);
+        const sameOriginUrl = `${SAME_ORIGIN_API}?${cacheBust}`;
+        const res = await fetch(sameOriginUrl, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!extractLeadList(data).length && !Array.isArray(data?.data))
+          throw new Error("Invalid response format");
+        console.log("✅ Same-origin API success");
+        return data;
+      } catch (e) {
+        console.warn(
+          "⚠️ Same-origin API failed, falling back to proxies...",
+          e.message,
+        );
+      }
+    } else {
+      console.log("ℹ️ Skipping same-origin API on static localhost; using proxy.");
     }
 
     const targetUrl = `${EXTERNAL_API_URL}?${cacheBust}`;
@@ -1273,67 +1390,49 @@
 
   async function createLeadOnAPI(payload) {
     // 1) Same-origin (Vercel)
-    try {
-      const res = await fetch(INSERT_API_SAME, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (data && (data.status === "success" || data.success === true))
-        return data;
-      // If unknown shape but exists, still return it
-      if (data) return data;
-      throw new Error("Invalid response format");
-    } catch (err) {
-      console.warn(
-        "Create via same-origin failed, trying direct (may hit CORS locally)",
-        err.message,
-      );
+    if (shouldTrySameOriginApi()) {
+      try {
+        const res = await fetch(INSERT_API_SAME, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data && (data.status === "success" || data.success === true))
+          return data;
+        // If unknown shape but exists, still return it
+        if (data) return data;
+        throw new Error("Invalid response format");
+      } catch (err) {
+        console.warn(
+          "Create via same-origin failed, trying direct (may hit CORS locally)",
+          err.message,
+        );
+      }
+    } else {
+      console.log("Skipping same-origin create on static localhost");
     }
 
     // 2) Direct to external (will likely be blocked by CORS in browser locally)
-    try {
-      const params = new URLSearchParams();
-      Object.entries(payload).forEach(([k, v]) => {
-        if (v !== undefined && v !== null) params.append(k, String(v));
-      });
-      const res = await fetch(INSERT_API_DIRECT, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: params,
-        mode: "cors",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
+    const params = new URLSearchParams();
+    Object.entries(payload).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
+
+    if (!isStaticLocalHost()) {
       try {
-        return JSON.parse(text);
-      } catch {
-        return { status: "success", raw: text };
-      }
-    } catch (err) {
-      console.warn("Direct create failed:", err.message);
-      // 3) Proxy fallback for local static
-      try {
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_API_DIRECT)}`;
-        const params = new URLSearchParams();
-        Object.entries(payload).forEach(([k, v]) => {
-          if (v !== undefined && v !== null) params.append(k, String(v));
-        });
-        const res = await fetch(proxyUrl, {
+        const res = await fetch(INSERT_API_DIRECT, {
           method: "POST",
           headers: {
             Accept: "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
           },
           body: params,
+          mode: "cors",
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
@@ -1342,11 +1441,35 @@
         } catch {
           return { status: "success", raw: text };
         }
-      } catch (proxyErr) {
-        throw new Error(
-          friendlyApiError("Erstellen fehlgeschlagen", proxyErr.message),
-        );
+      } catch (err) {
+        console.warn("Direct create failed:", err.message);
       }
+    } else {
+      console.log("Skipping direct create on static localhost; using proxy");
+    }
+
+    // 3) Proxy fallback for local static
+    try {
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_API_DIRECT)}`;
+      const res = await fetch(proxyUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { status: "success", raw: text };
+      }
+    } catch (proxyErr) {
+      throw new Error(
+        friendlyApiError("Erstellen fehlgeschlagen", proxyErr.message),
+      );
     }
   }
 
@@ -1377,6 +1500,7 @@ async function updateLeadOnAPI(id, payload) {
     status: payload.status,
     sale_typ: payload.sale_typ,
     bearbeiter: payload.bearbeiter,
+    delegieren: payload.delegieren,
     name: payload.name,
     salutation: payload.salutation,
     erstberatung_telefon: payload.erstberatung_telefon,
@@ -1521,7 +1645,9 @@ async function updateLeadOnAPI(id, payload) {
     const cacheBust = `_ts=${Date.now()}`;
     // 1) Same-origin on Vercel
     try {
-      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+      if (!shouldTrySameOriginApi()) {
+        throw new Error("Static localhost without /api");
+      }
       const res = await fetch(
         `${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`,
         { headers: { Accept: "application/json" }, cache: "no-store" },
@@ -1541,10 +1667,14 @@ async function updateLeadOnAPI(id, payload) {
       if (idx !== -1) fullLeadsData[idx].notes = normalized;
       return normalized;
     } catch (err) {
-      console.warn(
-        "Same-origin notes fetch failed, trying proxies:",
-        err.message,
-      );
+      if (!shouldTrySameOriginApi()) {
+        console.log("Skipping same-origin notes fetch on static localhost");
+      } else {
+        console.warn(
+          "Same-origin notes fetch failed, trying proxies:",
+          err.message,
+        );
+      }
     }
     // 2) Proxy fallback for local testing
     const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`;
@@ -1586,7 +1716,7 @@ async function updateLeadOnAPI(id, payload) {
       if (v !== undefined && v !== null) params.append(k, String(v));
     });
     try {
-      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+      if (!shouldTrySameOriginApi()) throw new Error("Static localhost without /api");
       const res = await fetch(NOTES_INSERT_SAME, {
         method: "POST",
         headers: {
@@ -1690,7 +1820,7 @@ async function updateLeadOnAPI(id, payload) {
 
     // 1) Same-origin first with lead_id, then id
     try {
-      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+      if (!shouldTrySameOriginApi()) throw new Error("Static localhost without /api");
       let list = await tryFetch(
         `${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`,
       );
@@ -1706,7 +1836,11 @@ async function updateLeadOnAPI(id, payload) {
       activityCache.set(activityKey, []);
       return [];
     } catch (err) {
-      console.warn("Same-origin activity fetch failed:", err.message);
+      if (!shouldTrySameOriginApi()) {
+        console.log("Skipping same-origin activity fetch on static localhost");
+      } else {
+        console.warn("Same-origin activity fetch failed:", err.message);
+      }
     }
 
     // 2) Proxy fallback for local (lead_id then id)
@@ -1730,7 +1864,8 @@ async function updateLeadOnAPI(id, payload) {
             activityCache.set(activityKey, list);
             return list;
           }
-          break;
+          activityCache.set(activityKey, []);
+          return [];
         } catch (e) {
           console.warn("Activity proxy failed:", url, e.message);
         }
@@ -2254,14 +2389,10 @@ async function updateLeadOnAPI(id, payload) {
     setFieldValue("editId", String(lead.id || ""));
     setFieldValue("editSalutation", lead.salutation || "");
     setFieldValue("editName", lead.name);
-     // FIX: Briefberatung Telefon - convert "Ja"/"Nein" back to original values
-  let briefberatungValue = "";
-  if (lead.briefberatungTelefon === "Ja") {
-    briefberatungValue = "Nein"; // Because in HTML, Nein = WAHR
-  } else if (lead.briefberatungTelefon === "Nein") {
-    briefberatungValue = "Ja"; // Because in HTML, Ja = FALSCH
-  }
-    setFieldValue("editBriefberatungTelefon", briefberatungValue);
+    setFieldValue(
+      "editBriefberatungTelefon",
+      normalizeBriefberatungTelefonValue(lead.briefberatungTelefon),
+    );
     setFieldValue("editStrasseObjekt", lead.strasseObjekt || "");
     setFieldValue("editAngebot", lead.angebot || "");
     setFieldValue("editPlz", lead.plz || "");
@@ -2308,7 +2439,8 @@ async function updateLeadOnAPI(id, payload) {
       <div class="view-detail-row"><div class="view-detail-label">Telefon</div><div class="view-detail-value">${escapeHtml(lead.telefon || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">E-Mail</div><div class="view-detail-value">${escapeHtml(lead.email || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Straße</div><div class="view-detail-value">${escapeHtml(lead.strasseObjekt || "—")}</div></div>
-      <div class="view-detail-row"><div class="view-detail-label">PLZ / Ort</div><div class="view-detail-value">${escapeHtml(lead.plz ? lead.plz + " " : "")}${escapeHtml(lead.ort)}</div></div>
+      <div class="view-detail-row"><div class="view-detail-label">PLZ</div><div class="view-detail-value">${escapeHtml(lead.plz || "—")}</div></div>
+      <div class="view-detail-row"><div class="view-detail-label">Ort</div><div class="view-detail-value">${escapeHtml(lead.ort || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Kontakt Via</div><div class="view-detail-value">${escapeHtml(lead.kontaktVia || "—")}</div></div>`;
     document.getElementById("viewTabLead").innerHTML = `
       <div class="view-detail-row"><div class="view-detail-label">Status</div><div class="view-detail-value"><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></div></div>
@@ -2325,7 +2457,7 @@ async function updateLeadOnAPI(id, payload) {
     document.getElementById("viewTabRoof").innerHTML = `
       <div class="view-detail-row"><div class="view-detail-label">Dachfläche (m²)</div><div class="view-detail-value">${escapeHtml(lead.dachflaeche || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Dacheindeckung</div><div class="view-detail-value">${escapeHtml(lead.dacheindeckung || "—")}</div></div>
-       <div class="view-detail-row"><div class="view-detail-label">Erstberatung Telefon / Briefberatung Telefon</div><div class="view-detail-value">${escapeHtml(lead.briefberatungTelefon || "—")}</div></div>
+       <div class="view-detail-row"><div class="view-detail-label">Erstberatung Telefon</div><div class="view-detail-value">${escapeHtml(normalizeBriefberatungTelefonValue(lead.briefberatungTelefon) || "—")}</div></div>
 
       <div class="view-detail-row"><div class="view-detail-label">Baujahr Dach</div><div class="view-detail-value">${escapeHtml(lead.baujahr || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Dachpfanne</div><div class="view-detail-value">${escapeHtml(lead.dachpfanne || "—")}</div></div>
@@ -2605,20 +2737,43 @@ async function updateLeadOnAPI(id, payload) {
     // Rebuild current view with optimistic cache
     fullLeadsData = mergeAfterFetch(fullLeadsData);
     loadPage(1);
+    return tempLead.id;
   }
 
   function updateLead(id, data) {
     const idx = fullLeadsData.findIndex((l) => l.id == id);
     if (idx === -1) return;
     const raw = parseFloat(data.summe) || 0;
+    const normalizedBriefberatungTelefon = normalizeBriefberatungTelefonValue(
+      data.briefberatungTelefon,
+    );
+    const normalizedPatch = {
+      ...data,
+      briefberatungTelefon: normalizedBriefberatungTelefon,
+      erstberatung_telefon: normalizedBriefberatungTelefon,
+    };
     fullLeadsData[idx] = {
       ...fullLeadsData[idx],
-      ...data,
+      ...normalizedPatch,
       statusClass: getStatusClass(data.status),
       summe: `$ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
     };
     // Track as pending update until backend reflects it
-    pendingUpdates.set(String(id), data);
+    pendingUpdates.set(String(id), normalizedPatch);
+    pushKundenPendingUpdate(id, {
+      id: String(id),
+      lead_id: String(id),
+      erstberatung_telefon: normalizedBriefberatungTelefon,
+      briefberatungTelefon: normalizedBriefberatungTelefon,
+      status: normalizedPatch.status,
+      bearbeiter: normalizedPatch.bearbeiter,
+      delegieren: normalizedPatch.delegieren,
+      name: normalizedPatch.name,
+      ort: normalizedPatch.ort,
+      email: normalizedPatch.email,
+      telefon: normalizedPatch.telefon,
+      datum: normalizedPatch.datum,
+    });
     loadPage(currentPage);
   }
 
@@ -2773,6 +2928,7 @@ if (currentEditId) {
       datum: data.datum,
       nachfassen: data.nachfassen,
       bearbeiter: data.bearbeiter,
+      delegieren: data.delegieren,
       summe_netto: data.summe,
       dachflaeche_m2: data.dachflaeche,
       dachneigung_grad: data.dachneigung,
@@ -2810,6 +2966,7 @@ if (currentEditId) {
   }
   return;
 }
+        let tempLeadId = null;
         try {
           const payload = {
             salutation: data.salutation,
@@ -2841,13 +2998,17 @@ if (currentEditId) {
           };
           // Hide panel immediately and add optimistic row
           closePanel();
-          addPendingCreate(data);
+          tempLeadId = addPendingCreate(data);
           const resp = await createLeadOnAPI(payload);
           console.log("🆕 Create response:", resp);
           showToast("Lead wurde erstellt. Synchronisiere…", "success", 2200);
           await refreshLeads();
           schedulePostCreateSync();
         } catch (err) {
+          if (tempLeadId != null) {
+            removePendingCreate(tempLeadId);
+            loadPage(1);
+          }
           showToast(err.message || "Erstellen fehlgeschlagen", "error", 2800);
         }
       });

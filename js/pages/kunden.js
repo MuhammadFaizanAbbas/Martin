@@ -632,6 +632,60 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
     return String(value || "").trim();
   }
 
+  function normalizeLeadIdentityValue(value) {
+    const normalized = String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+    if (
+      !normalized ||
+      normalized === "—" ||
+      normalized === "-" ||
+      normalized === "null" ||
+      normalized === "undefined"
+    ) {
+      return "";
+    }
+
+    return normalized;
+  }
+
+  function getLeadIdentityKey(lead) {
+    const id = String(lead?.id ?? "").trim();
+    if (id) return `id|${id}`;
+
+    const name = normalizeLeadIdentityValue(lead?.name);
+    const email = normalizeLeadIdentityValue(lead?.email);
+    const telefon = normalizeLeadIdentityValue(lead?.telefon).replace(
+      /[^\d+]/g,
+      "",
+    );
+    const ort = normalizeLeadIdentityValue(lead?.ort);
+    const datum = normalizeLeadIdentityValue(lead?.datum);
+
+    if (name && (email || telefon)) return `contact|${name}|${email}|${telefon}`;
+    if (name && ort) return `location|${name}|${ort}|${datum}`;
+    if (name && datum) return `dated|${name}|${datum}`;
+    if (email || telefon) return `direct|${email}|${telefon}`;
+    return "";
+  }
+
+  function dedupeLeadList(list) {
+    const deduped = [];
+    const seen = new Set();
+
+    list.forEach((lead) => {
+      const key = getLeadIdentityKey(lead);
+      if (!key || !seen.has(key)) {
+        if (key) seen.add(key);
+        deduped.push(lead);
+      }
+    });
+
+    return deduped;
+  }
+
   function getTeleconsultationSelection(leadId) {
     const key = String(leadId);
     const cached = teleconsultationSelections.get(key);
@@ -646,6 +700,32 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
 
   function isErstberatungChecked(lead) {
     return getTeleconsultationSelection(lead?.id) === "true";
+  }
+
+  function applyErstberatungState(leadId, value) {
+    const key = String(leadId);
+    const normalizedErstberatung = normalizeErstberatungValue(value);
+    const lead = leadsData.find((item) => String(item.id) === key);
+    if (lead) {
+      lead.erstberatung_telefon = normalizedErstberatung;
+    }
+
+    if (normalizedErstberatung === "WAHR") {
+      teleconsultationSelections.set(key, "true");
+      syncEditPermissionState(key, true);
+    } else if (normalizedErstberatung === "FALSCH") {
+      teleconsultationSelections.set(key, "false");
+      syncEditPermissionState(key, false);
+    } else {
+      teleconsultationSelections.delete(key);
+      syncEditPermissionState(key, false);
+    }
+
+    if (lead) {
+      queuePendingUpdate(lead.id, { erstberatung_telefon: normalizedErstberatung });
+    }
+
+    return normalizedErstberatung;
   }
 
 async function insertActivity(leadId, activityType, activityText, meta = {}) {
@@ -942,13 +1022,13 @@ async function fetchActivityForLead(leadId) {
         const rawCachedList = Array.isArray(cached)
           ? cached
           : (cached.data || cached.leads || cached.items || []);
-        return applyPendingUpdates((rawCachedList || []).map((apiLead) => ({
+        const mappedCachedLeads = applyPendingUpdates((rawCachedList || []).map((apiLead) => ({
           id: apiLead.id,
           name: apiLead.name || "â€”",
           salutation: apiLead.salutation || "",
           ort: apiLead.ort || "â€”",
-          status: STATUS_MAPPING[apiLead.status] || apiLead.status || "Offen",
-          statusClass: getStatusClass(apiLead.status),
+          status: normalizeLeadStatus(apiLead.status),
+          statusClass: getStatusClass(normalizeLeadStatus(apiLead.status)),
           quelle: apiLead.lead_quelle || "â€”",
           bearbeiter: apiLead.bearbeiter || "â€”",
           summe: apiLead.summe_netto ? `$ ${formatNumber(apiLead.summe_netto)}` : "$ 0,00",
@@ -975,6 +1055,7 @@ async function fetchActivityForLead(leadId) {
           notes: [],
           activities: [],
         })));
+        return dedupeLeadList(mappedCachedLeads);
       }
       console.error("Failed to fetch leads:", result.error);
       return [];
@@ -986,13 +1067,13 @@ async function fetchActivityForLead(leadId) {
       ? result.data
       : (result.data.data || result.data.leads || result.data.items || []);
 
-    return applyPendingUpdates((rawList || []).map((apiLead) => ({
+    const mappedLeads = applyPendingUpdates((rawList || []).map((apiLead) => ({
       id: apiLead.id,
       name: apiLead.name || "—",
       salutation: apiLead.salutation || "",
       ort: apiLead.ort || "—",
-      status: STATUS_MAPPING[apiLead.status] || apiLead.status || "Offen",
-      statusClass: getStatusClass(apiLead.status),
+      status: normalizeLeadStatus(apiLead.status),
+      statusClass: getStatusClass(normalizeLeadStatus(apiLead.status)),
       quelle: apiLead.lead_quelle || "—",
       bearbeiter: apiLead.bearbeiter || "—",
       summe: apiLead.summe_netto
@@ -1024,6 +1105,7 @@ async function fetchActivityForLead(leadId) {
       notes: [],
       activities: [],
     })));
+    return dedupeLeadList(mappedLeads);
   }
 
   async function fetchDashboardStats() {
@@ -1179,7 +1261,7 @@ function protectFilterDropdowns() {
     const uniqueStatuses = [
       ...new Set(
         leadsData
-          .map((lead) => String(lead.status || "").trim())
+          .map((lead) => getCanonicalStatus(lead.status))
           .filter((value) => value && value !== "???" && value !== "?"),
       ),
     ];
@@ -1306,8 +1388,10 @@ function protectFilterDropdowns() {
 
   function getCanonicalStatus(status) {
     const normalized = normalizeStatusValue(status);
+    if (!normalized) return "";
     if (normalized === "follow up") return "follow up";
     if (normalized === "offen") return "Offen";
+    if (normalized === "tne offen") return "TNE Offen";
     if (normalized === "in bearbeitung") return "in Bearbeitung";
     if (normalized === "nur info eingeholt" || normalized === "infos eingeholt") {
       return "Nur Info eingeholt";
@@ -1322,15 +1406,28 @@ function protectFilterDropdowns() {
     return String(status || "").trim();
   }
 
+  function statusMatches(status, expectedStatus) {
+    return getCanonicalStatus(status) === getCanonicalStatus(expectedStatus);
+  }
+
   function getStatusCount(status) {
     const target = getCanonicalStatus(status);
     return leadsData.filter((lead) => getCanonicalStatus(lead.status) === target).length;
   }
 
+  function normalizeLeadStatus(rawStatus) {
+    const trimmedStatus = String(rawStatus || "").trim();
+    const mappedStatus =
+      STATUS_MAPPING[trimmedStatus] ?? STATUS_MAPPING[rawStatus];
+    return getCanonicalStatus(mappedStatus ?? trimmedStatus);
+  }
+
   function getStatusClass(status) {
     const statusLower = normalizeStatusValue(status);
+    if (!statusLower) return "badge-neutral";
     if (statusLower === "follow up") return "badge-follow";
     if (statusLower === "offen") return "badge-offen";
+    if (statusLower === "tne offen") return "badge-offen";
     if (
       statusLower === "infos eingeholt" ||
       statusLower === "nur info eingeholt"
@@ -1343,7 +1440,7 @@ function protectFilterDropdowns() {
     )
       return "badge-beauft";
     if (statusLower === "in bearbeitung") return "badge-bearbeitung";
-    return "badge-offen";
+    return "badge-neutral";
   }
 
   function isInBearbeitungStatus(status) {
@@ -1373,22 +1470,22 @@ function protectFilterDropdowns() {
         key: "offen",
         label: "Offen",
         icon: "📞",
-        count: dashboardStats.Offen || 0,
-        filter: (l) => l.status === "Offen",
+        count: getCountOrFallback("Offen", "Offen"),
+        filter: (l) => statusMatches(l.status, "Offen"),
       },
       {
         key: "bearbeitung",
         label: "in Bearbeitung",
         icon: "📞",
-        count: dashboardStats["in Bearbeitung"] || 0,
+        count: getCountOrFallback("in Bearbeitung", "in Bearbeitung"),
         filter: (l) => isInBearbeitungStatus(l.status),
       },
       {
         key: "followup",
         label: "Follow up",
         icon: "📞",
-        count: dashboardStats["follow up"] || 0,
-        filter: (l) => l.status === "follow up",
+        count: getCountOrFallback("follow up", "follow up"),
+        filter: (l) => statusMatches(l.status, "follow up"),
       },
       {
         key: "auftrags",
@@ -1719,7 +1816,7 @@ function protectFilterDropdowns() {
     const lead = leadsData.find(l => l.id === leadId);
     if (!lead) return;
     
-    const currentSelection = teleconsultationSelections.get(leadId) || '';
+    const currentSelection = getTeleconsultationSelection(leadId);
     
     const modalHtml = `
       <div id="teleconsultationModal" class="k-modal-overlay">
@@ -1786,7 +1883,7 @@ function protectFilterDropdowns() {
           const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
           if (editBtn) editBtn.disabled = false;
         }
-        teleconsultationSelections.set(leadId, 'true');
+        teleconsultationSelections.set(String(leadId), 'true');
       } else if (selectedValue === 'false') {
         if (checkboxElement && checkboxElement.checked) {
           checkboxElement.checked = false;
@@ -1802,7 +1899,7 @@ function protectFilterDropdowns() {
           const editBtn = editCheckbox.parentElement?.querySelector(".edit-icon-btn");
           if (editBtn) editBtn.disabled = true;
         }
-        teleconsultationSelections.set(leadId, 'false');
+        teleconsultationSelections.set(String(leadId), 'false');
       }
       
       console.log(`Teleconsultation for lead ${leadId} set to ${selectedValue}`);
@@ -1929,12 +2026,13 @@ function openEditStatusModal(leadId) {
       // IMPORTANT: Update dashboard stats BEFORE updating the lead object
       // Map status to dashboard keys
       const getDashboardKey = (status) => {
-        if (status === "follow up") return "follow up";
-        if (status === "in Bearbeitung") return "in Bearbeitung";
-        if (status === "Offen") return "Offen";
-        if (status === "Nur Info eingeholt") return "Nur Info eingeholt";
-        if (status === "falscher Kunde") return "falscher Kunde";
-        return status;
+        const canonicalStatus = getCanonicalStatus(status);
+        if (canonicalStatus === "follow up") return "follow up";
+        if (canonicalStatus === "in Bearbeitung") return "in Bearbeitung";
+        if (canonicalStatus === "Offen") return "Offen";
+        if (canonicalStatus === "Nur Info eingeholt") return "Nur Info eingeholt";
+        if (canonicalStatus === "falscher Kunde") return "falscher Kunde";
+        return canonicalStatus;
       };
       
       const oldKey = getDashboardKey(previousStatus);
@@ -2286,16 +2384,10 @@ const payload = {
         queuePendingUpdate(lead.id, updatedLead);
         Object.assign(lead, updatedLead);
 
-        const erstberatungValue = normalizeErstberatungValue(
+        applyErstberatungState(
+          lead.id,
           payload.erstberatung_telefon || lead.erstberatung_telefon || "",
         );
-        if (erstberatungValue === "WAHR") {
-          teleconsultationSelections.set(lead.id, "true");
-          syncEditPermissionState(lead.id, true);
-        } else if (erstberatungValue === "FALSCH") {
-          teleconsultationSelections.set(lead.id, "false");
-          syncEditPermissionState(lead.id, false);
-        }
         
         showToast("Lead erfolgreich aktualisiert!", "success", 2000);
         renderKunden();
@@ -2496,13 +2588,54 @@ const payload = {
   }
 };
 
-  window.sendEmailToKunde = (id) => {
-    const lead = leadsData.find((l) => l.id === id);
-    if (lead && lead.email) {
-      alert(`E-Mail wird gesendet an: ${lead.email}`);
-    } else {
-      showToast("Is customer ke liye email address available nahi hai.", "error", 2500);
+  window.sendEmailToKunde = async (id) => {
+    const lead = leadsData.find((l) => String(l.id) === String(id));
+    if (!lead) {
+      showToast("Kunde nicht gefunden.", "error", 2200);
+      return;
     }
+
+    const email = String(lead.email || "").trim();
+    if (!email) {
+      showToast("Is customer ke liye email address available nahi hai.", "error", 2500);
+      return;
+    }
+
+    const to = encodeURIComponent(email);
+    const subject = encodeURIComponent("Project Update");
+    const body = encodeURIComponent("Hi,\n\nHere is the update.\n\nRegards,");
+    const composeUrl = `https://hex2013.com/owa/?path=/mail/action/compose&to=${to}&subject=${subject}&body=${body}`;
+    const composeWindow = window.open(composeUrl, "_blank");
+
+    if (!composeWindow) {
+      showToast("E-Mail-Fenster konnte nicht geöffnet werden.", "error", 2600);
+      return;
+    }
+
+    const actor = resolveActivityActorForLead(lead.id, lead.bearbeiter);
+    const activityText = rewriteActivityTextActor(
+      `${actor} öffnete E-Mail an ${email}`,
+      actor,
+    );
+
+    addOptimisticActivity(lead.id, {
+      text: activityText,
+      by: actor,
+      at: new Date().toLocaleString(),
+    });
+
+    try {
+      await insertActivity(lead.id, "email", activityText, {
+        bearbeiter: actor,
+        from: actor,
+        email,
+        leadName: lead.name,
+      });
+    } catch (err) {
+      console.warn("Failed to record email activity:", err?.message || err);
+    }
+
+    showToast(`E-Mail-Fenster geöffnet: ${email}`, "success", 2800);
   };
 
   window.openKarte = (id) => {
@@ -2562,7 +2695,7 @@ const payload = {
     }
     
     if (statusFilter) {
-      data = data.filter(l => l.status === statusFilter);
+      data = data.filter((l) => statusMatches(l.status, statusFilter));
     }
     
     if (leadSourceFilter) {
@@ -2838,20 +2971,14 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
       console.warn("Erstberatung Telefon update returned rows_updated: 0", payload);
     }
 
-    const normalizedErstberatung =
-      selectedValue === 'true' ? "WAHR" : "FALSCH";
+    const normalizedErstberatung = applyErstberatungState(
+      leadId,
+      selectedValue === 'true' ? "WAHR" : "FALSCH",
+    );
 
     if (selectedValue === 'true') {
-      lead.erstberatung_telefon = normalizedErstberatung;
-      syncEditPermissionState(leadId, true);
-      teleconsultationSelections.set(String(leadId), 'true');
-      queuePendingUpdate(lead.id, { erstberatung_telefon: normalizedErstberatung });
       showToast(`Erstberatung Telefon wurde auf WAHR gesetzt f?r ${lead.name}`, "success", 3000);
     } else if (selectedValue === 'false') {
-      lead.erstberatung_telefon = normalizedErstberatung;
-      syncEditPermissionState(leadId, false);
-      teleconsultationSelections.set(String(leadId), 'false');
-      queuePendingUpdate(lead.id, { erstberatung_telefon: normalizedErstberatung });
       showToast(`Erstberatung Telefon wurde auf FALSCH gesetzt f?r ${lead.name}`, "success", 3000);
     }
 
@@ -3008,6 +3135,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
       .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 500; white-space: nowrap; }
       .badge-follow { background: #dbeafe; color: #1e40af; }
       .badge-offen  { background: #fef3c7; color: #92400e; }
+      .badge-neutral { background: #e5e7eb; color: #475569; }
       .badge-info   { background: #e0e7ff; color: #4338ca; }
       .badge-beauft { background: #dcfce7; color: #166534; }
       .badge-bearbeitung { background: #fed7aa; color: #9a3412; }
