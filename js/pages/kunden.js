@@ -9,7 +9,7 @@ const kundenPage = (function () {
   const KUNDEN_DASHBOARD_CACHE_KEY = "kunden-dashboard-cache-v1";
 
   // ── API URLs ──────────────────────────────────────────────────────────────
-  const SO_LEADS = "/api/leads";
+  const SO_LEADS = "/api/all_leads";
   const SO_DASHBOARD = "/api/dashboard";
   const REMOTE_LEADS_URL = "https://goarrow.ai/test/fetch_all_leads.php";
   const REMOTE_DASHBOARD_URL = "https://goarrow.ai/test/dashboard.php";
@@ -1144,6 +1144,7 @@ async function fetchActivityForLead(leadId) {
     populateFilterOptions();
     protectFilterDropdowns();
     saveJsonCache(KUNDEN_LEADS_CACHE_KEY, leads);
+    renderStats();
     renderKunden();
     return leads;
   }

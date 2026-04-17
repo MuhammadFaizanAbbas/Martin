@@ -1076,36 +1076,6 @@
     });
   }
 
-  function dedupeLeads(list) {
-    const deduped = [];
-    const seen = new Map();
-
-    list.forEach((lead) => {
-      const key = leadKey(lead);
-      if (!key) {
-        deduped.push(lead);
-        return;
-      }
-
-      const existingIndex = seen.get(key);
-      if (existingIndex == null) {
-        seen.set(key, deduped.length);
-        deduped.push(lead);
-        return;
-      }
-
-      const existingLead = deduped[existingIndex];
-      const existingIsTemp = Number(existingLead?.id) < 0;
-      const incomingIsReal = Number(lead?.id) > 0;
-
-      if (existingIsTemp && incomingIsReal) {
-        deduped[existingIndex] = lead;
-      }
-    });
-
-    return deduped;
-  }
-
   function removePendingCreate(tempId) {
     pendingCreates = pendingCreates.filter((lead) => lead.id !== tempId);
     fullLeadsData = fullLeadsData.filter((lead) => lead.id !== tempId);
@@ -1125,7 +1095,7 @@
       return !key || !serverKeys.has(key);
     });
 
-    return dedupeLeads([...pendingCreates, ...withUpdates]);
+    return [...pendingCreates, ...withUpdates];
   }
 
   function getStatusClass(status) {
@@ -1251,7 +1221,7 @@
   // ─────────────────────────────────────────────
   // API FETCH
   // ─────────────────────────────────────────────
-  const EXTERNAL_API_URL = "https://goarrow.ai/test/fetch_lead.php";
+  const EXTERNAL_API_URL = "https://goarrow.ai/test/fetch_all_leads.php";
   const INSERT_API_DIRECT = "https://goarrow.ai/test/insert_lead.php";
   const INSERT_API_SAME = "/api/insert_lead";
   const UPDATE_API_DIRECT = "https://goarrow.ai/test/update_lead.php";
@@ -1384,7 +1354,7 @@
     }
 
     throw new Error(
-      "All CORS proxies failed. Please enable CORS on https://goarrow.ai/test/fetch_lead.php or use the same-origin API.",
+      "All CORS proxies failed. Please enable CORS on https://goarrow.ai/test/fetch_all_leads.php or use the same-origin API.",
     );
   }
 
