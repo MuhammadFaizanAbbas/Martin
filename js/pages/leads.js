@@ -825,6 +825,21 @@
     return "System";
   }
 
+  function getCurrentUserName() {
+    const candidates = [
+      document.querySelector(".sidebar-footer .user-name")?.textContent,
+      document.querySelector(".user-name")?.textContent,
+      typeof currentBearbeiter === "string" ? currentBearbeiter : "",
+    ];
+
+    for (const value of candidates) {
+      const normalized = String(value || "").trim();
+      if (normalized && normalized !== "—") return normalized;
+    }
+
+    return "System";
+  }
+
   function addOptimisticActivity(leadId, activity) {
     const key = String(leadId);
     const existing = activityCache.get(key) || [];
@@ -1134,28 +1149,52 @@
       note?.created_by,
       note?.createdBy,
       note?.author,
+      note?.by,
       note?.user,
       note?.name,
+    );
+    const date = firstNonEmpty(
+      note?.date,
+      note?.created_at,
+      note?.createdAt,
     );
 
     return {
       text: String(note?.text || note?.note || note?.message || ""),
       author,
-      date: String(note?.date || note?.created_at || note?.createdAt || ""),
+      created_by: author,
+      date,
     };
   }
 
   function renderLeadNote(note) {
+    const author = firstNonEmpty(
+      note?.author,
+      note?.created_by,
+      note?.createdBy,
+      note?.by,
+      note?.user,
+      note?.name,
+    );
+    const date = firstNonEmpty(
+      note?.date,
+      note?.created_at,
+      note?.createdAt,
+    );
     const metaParts = [
-      note?.author
-        ? `<span>${escapeHtml(note.author)}</span>`
+      author
+        ? `<span>created_by: <strong>${escapeHtml(author)}</strong></span>`
         : "",
-      note?.date
-        ? `<span>${escapeHtml(note.date)}</span>`
+      date
+        ? `<span>${escapeHtml(date)}</span>`
         : "",
     ].filter(Boolean);
 
-    return `<div class="note-card"><div class="note-text">${escapeHtml(note?.text || "")}</div><div class="note-meta">${metaParts.join("")}</div></div>`;
+    return `<div class="note-card">
+    <div class="note-text">${escapeHtml(note?.text || "")}</div>
+    <div class="note-meta">${metaParts.join("")}</div>
+    <div class="note-raw" style="display:none;">${escapeHtml(JSON.stringify(note))}</div>
+    </div>`;
   }
 
   function normalizeBriefberatungTelefonValue(value) {
@@ -1701,7 +1740,16 @@ async function updateLeadOnAPI(id, payload) {
   }
 
   async function createNoteForLead(leadId, text) {
-    const body = { lead_id: leadId, note: text, text };
+    const actor = getCurrentUserName();
+    const body = {
+      lead_id: leadId,
+      note: text,
+      text,
+      created_by: actor,
+      author: actor,
+      user: actor,
+      from: actor,
+    };
     const params = new URLSearchParams();
     Object.entries(body).forEach(([k, v]) => {
       if (v !== undefined && v !== null) params.append(k, String(v));
@@ -2581,9 +2629,11 @@ async function updateLeadOnAPI(id, payload) {
       .then(async () => {
         showToast("Notiz gespeichert. Synchronisiere…", "success", 2200);
         document.getElementById("noteInput").value = "";
+        const actor = getCurrentUserName();
         const optimisticNote = {
           text: txt,
-          author: "You",
+          author: actor,
+          created_by: actor,
           date: new Date().toLocaleString(),
         };
         const existingNotes = Array.isArray(lead.notes) ? lead.notes : [];

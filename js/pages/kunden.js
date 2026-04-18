@@ -582,6 +582,21 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
     return "";
   }
 
+  function getCurrentUserName() {
+    const candidates = [
+      document.querySelector(".sidebar-footer .user-name")?.textContent,
+      document.querySelector(".user-name")?.textContent,
+      bearbeiterFilter,
+    ];
+
+    for (const value of candidates) {
+      const normalized = String(value || "").trim();
+      if (normalized && normalized !== "—") return normalized;
+    }
+
+    return "System";
+  }
+
   function resolveActivityActorForLead(leadId, preferred = "") {
     const key = String(leadId);
     const lead = leadsData.find((l) => String(l.id) === key);
@@ -824,7 +839,16 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
   const NOTES_INSERT_SAME = "/api/insert_lead_note";
 
   async function createNoteForLead(leadId, text) {
-    const body = { lead_id: leadId, note: text, text };
+    const actor = getCurrentUserName();
+    const body = {
+      lead_id: leadId,
+      note: text,
+      text,
+      created_by: actor,
+      author: actor,
+      user: actor,
+      from: actor,
+    };
     const params = new URLSearchParams();
     Object.entries(body).forEach(([k, v]) => {
       if (v !== undefined && v !== null) params.append(k, String(v));
@@ -922,7 +946,24 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
       const list = Array.isArray(data) ? data : (data?.data || data?.notes || []);
       return (list || []).map((n) => ({
         text: String(n.text || n.note || n.message || ''),
-        author: String(n.author || n.user || 'Created at'),
+        author: String(
+          n.created_by ||
+          n.createdBy ||
+          n.author ||
+          n.by ||
+          n.user ||
+          n.name ||
+          'Bearbeiter unbekannt'
+        ),
+        created_by: String(
+          n.created_by ||
+          n.createdBy ||
+          n.author ||
+          n.by ||
+          n.user ||
+          n.name ||
+          'Bearbeiter unbekannt'
+        ),
         date: String(n.date || n.created_at || ''),
       }));
     };
