@@ -169,7 +169,7 @@
       </div>
       <div class="side-panel-body">
         <form id="editForm">
-          <div class="form-group"><label>ID</label><input type="text" id="editId" placeholder="—" readonly></div>
+          <div class="form-group" id="editIdGroup"><label>ID</label><input type="text" id="editId" placeholder="—" readonly></div>
           <div class="form-group"><label>Salutation</label><select id="editSalutation"><option value="">Wählen...</option><option value="Herr">Herr</option><option value="Frau">Frau</option><option value="Divers">Divers</option></select></div>
           <div class="form-group"><label>Name *</label><input type="text" id="editName" placeholder="Geben Sie den Namen ein" required></div>
           <div class="form-group"><label>Erstberatung Telefon</label>
@@ -249,7 +249,7 @@
             <div class="form-group"><label>Nachfassen</label><input type="date" id="editNachfassen"></div>
           </div>
           <div class="form-group"><label>Bearbeiter</label><select id="editBearbeiter"><option value="">Wählen...</option><option value="Philipp">Philipp</option><option value="André">André</option><option value="Martin">Martin</option><option value="Simon">Simon</option></select></div>
-          <div class="form-group"><label>Delegieren</label><select id="editDelegieren"><option value="">Wählen...</option><option value="Philipp">Philipp</option><option value="André">André</option><option value="Martin">Martin</option><option value="Simon">Simon</option></select></div>
+          <div class="form-group" id="editDelegierenGroup"><label>Delegieren</label><select id="editDelegieren"><option value="">Wählen...</option><option value="Philipp">Philipp</option><option value="André">André</option><option value="Martin">Martin</option><option value="Simon">Simon</option></select></div>
           <div class="form-group"><label>Summe Netto</label><input type="text" id="editSumme" placeholder="Betrag"></div>
           <div class="form-row">
             <div class="form-group"><label>Dachfläche m²</label><input type="text" id="editDachflaeche" placeholder="Dachfläche"></div>
@@ -484,7 +484,7 @@
       .actions { display: flex; gap: 3px; flex-wrap: nowrap; align-items: center; justify-content: flex-start; }
       .expand-row { display: none; background: #f9fafb; }
       .expand-row.open { display: table-row; }
-      .expand-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px; }
+      .expand-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 12px; }
       .expand-item { display: flex; flex-direction: column; }
       .expand-item label { font-size: 0.65rem; color: #64748b; margin-bottom: 3px; }
       .expand-item span { font-size: 0.8rem; font-weight: 500; color: #0f172a; }
@@ -1129,6 +1129,35 @@
     return payload.data || payload.leads || payload.items || payload.results || [];
   }
 
+  function normalizeLeadNote(note) {
+    const author = firstNonEmpty(
+      note?.created_by,
+      note?.createdBy,
+      note?.author,
+      note?.user,
+      note?.name,
+    );
+
+    return {
+      text: String(note?.text || note?.note || note?.message || ""),
+      author,
+      date: String(note?.date || note?.created_at || note?.createdAt || ""),
+    };
+  }
+
+  function renderLeadNote(note) {
+    const metaParts = [
+      note?.author
+        ? `<span>${escapeHtml(note.author)}</span>`
+        : "",
+      note?.date
+        ? `<span>${escapeHtml(note.date)}</span>`
+        : "",
+    ].filter(Boolean);
+
+    return `<div class="note-card"><div class="note-text">${escapeHtml(note?.text || "")}</div><div class="note-meta">${metaParts.join("")}</div></div>`;
+  }
+
   function normalizeBriefberatungTelefonValue(value) {
     const normalized = String(value ?? "").trim().toUpperCase();
     if (!normalized) return "";
@@ -1625,11 +1654,7 @@ async function updateLeadOnAPI(id, payload) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list = Array.isArray(data) ? data : data.data || data.notes || [];
-      const normalized = (list || []).map((n) => ({
-        text: String(n.text || n.note || n.message || ""),
-        author: String(n.author || n.user || "Created at"),
-        date: String(n.date || n.created_at || ""),
-      }));
+      const normalized = (list || []).map(normalizeLeadNote);
       notesCache.set(String(leadId), normalized);
       const idx = fullLeadsData.findIndex(
         (l) => String(l.id) === String(leadId),
@@ -1661,11 +1686,7 @@ async function updateLeadOnAPI(id, payload) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
         const list = Array.isArray(data) ? data : data.data || data.notes || [];
-        const normalized = (list || []).map((n) => ({
-          text: String(n.text || n.note || n.message || ""),
-          author: String(n.author || n.user || "System"),
-          date: String(n.date || n.created_at || ""),
-        }));
+        const normalized = (list || []).map(normalizeLeadNote);
         notesCache.set(String(leadId), normalized);
         const idx = fullLeadsData.findIndex(
           (l) => String(l.id) === String(leadId),
@@ -2323,6 +2344,11 @@ async function updateLeadOnAPI(id, payload) {
   // ─────────────────────────────────────────────
   function openPanel(title) {
     console.log("Opening panel:", title); // Add this line
+    const isEditMode = Boolean(currentEditId);
+    const editIdGroup = document.getElementById("editIdGroup");
+    const editDelegierenGroup = document.getElementById("editDelegierenGroup");
+    if (editIdGroup) editIdGroup.style.display = isEditMode ? "" : "none";
+    if (editDelegierenGroup) editDelegierenGroup.style.display = isEditMode ? "" : "none";
     document.getElementById("editPanelTitle").textContent = title;
     document.getElementById("editPanel").classList.add("open");
     document.getElementById("panelOverlay").classList.add("active");
@@ -2444,10 +2470,7 @@ async function updateLeadOnAPI(id, payload) {
           const currentLead = fullLeadsData.find((l) => l.id == id);
           notesEl.innerHTML = currentLead?.notes?.length
             ? currentLead.notes
-                .map(
-                  (n) =>
-                    `<div class="note-card"><div class="note-text">${escapeHtml(n.text)}</div><div class="note-meta"><span>${escapeHtml(n.author)}</span><span>${escapeHtml(n.date)}</span></div></div>`,
-                )
+                .map(renderLeadNote)
                 .join("")
             : '<div class="empty-state">Keine Notizen vorhanden.</div>';
         })
@@ -2545,10 +2568,7 @@ async function updateLeadOnAPI(id, payload) {
       return;
     }
     list.innerHTML = lead.notes
-      .map(
-        (n) =>
-          `<div class="note-card"><div class="note-text">${escapeHtml(n.text)}</div><div class="note-meta"><span>${escapeHtml(n.author)}</span><span>${escapeHtml(n.date)}</span></div></div>`,
-      )
+      .map(renderLeadNote)
       .join("");
   }
 
@@ -2647,6 +2667,10 @@ async function updateLeadOnAPI(id, payload) {
   }
 
   function collectForm() {
+    const existingLead = currentEditId
+      ? fullLeadsData.find((l) => String(l.id) === String(currentEditId))
+      : null;
+
     return {
       salutation: val("editSalutation"),
       name: val("editName"),
@@ -2664,7 +2688,9 @@ async function updateLeadOnAPI(id, payload) {
       datum: val("editDatum"),
       nachfassen: val("editNachfassen"),
       bearbeiter: val("editBearbeiter"),
-    delegieren: val("editDelegieren"),  // Make sure this line exists
+      delegieren: document.getElementById("editDelegieren")
+        ? val("editDelegieren")
+        : existingLead?.delegieren || "",
       summe: val("editSumme"),
       dachflaeche: val("editDachflaeche"),
       dachneigung: val("editDachneigung"),

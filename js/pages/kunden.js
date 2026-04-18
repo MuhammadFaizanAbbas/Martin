@@ -168,6 +168,9 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
     "follow up",
     "Offen",
     "In Bearbeitung",
+    "Auftragsbestätigung-follow up",
+    "Auftragsbestätigung-Offen",
+    "Auftragsbestätigung-in Bearbeitung",
     "Infos eingeholt",
     "Beauftragung",
     "Beauftragt",
@@ -185,16 +188,19 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
   const client_STATUS_OPTIONS = [
     "in Bearbeitung",
     "Offen",
+    "Auftragsbestätigung-Offen",
     "Nur Info eingeholt",
     "falscher Kunde",
   ];
   const BEARBEITUNG_STATUS_OPTIONS = [
     "follow up",
+    "Auftragsbestätigung-in Bearbeitung",
     "EA Beauftragung",
     "Beauftragung",
     "NF Beauftragung",
   ];
   const FOLLOW_UP_STATUS_OPTIONS = [
+    "Auftragsbestätigung-follow up",
     "Ghoster",
     "Abgesagt",
     "Abgesagt tot",
@@ -1394,6 +1400,14 @@ function protectFilterDropdowns() {
     if (normalized === "offen") return "Offen";
     if (normalized === "tne offen") return "TNE Offen";
     if (normalized === "in bearbeitung") return "in Bearbeitung";
+    if (
+      normalized === "auftragsbestätigung" ||
+      normalized === "auftragsbestätigung-offen" ||
+      normalized === "auftragsbestätigung-in bearbeitung" ||
+      normalized === "auftragsbestätigung-follow up"
+    ) {
+      return "Auftragsbestätigung";
+    }
     if (normalized === "nur info eingeholt" || normalized === "infos eingeholt") {
       return "Nur Info eingeholt";
     }
@@ -1441,6 +1455,13 @@ function protectFilterDropdowns() {
     )
       return "badge-beauft";
     if (statusLower === "in bearbeitung") return "badge-bearbeitung";
+    if (
+      statusLower === "auftragsbestätigung" ||
+      statusLower === "auftragsbestätigung-offen" ||
+      statusLower === "auftragsbestätigung-in bearbeitung" ||
+      statusLower === "auftragsbestätigung-follow up"
+    )
+      return "badge-beauft";
     return "badge-neutral";
   }
 
@@ -1492,7 +1513,7 @@ function protectFilterDropdowns() {
         key: "auftrags",
         label: "Auftragsbestätigung",
         icon: "📞",
-        count: 0,
+        count: getCountOrFallback("Auftragsbestätigung", "Auftragsbestätigung"),
         filter: (l) => l.status === "Auftragsbestätigung",
       },
       {
@@ -2000,6 +2021,7 @@ function openEditStatusModal(leadId) {
   
   saveBtn?.addEventListener('click', async () => {
     const newStatus = document.getElementById("editStatusSelect")?.value;
+    const resolvedStatus = getCanonicalStatus(newStatus);
     const previousStatus = lead.status;
 
     if (!newStatus) {
@@ -2007,7 +2029,7 @@ function openEditStatusModal(leadId) {
       return;
     }
 
-    if (newStatus === previousStatus) {
+    if (resolvedStatus === previousStatus) {
       closeModal();
       return;
     }
@@ -2019,7 +2041,7 @@ function openEditStatusModal(leadId) {
       const payload = buildLeadUpdatePayload(lead, {
         id: String(lead.id),
         lead_id: String(lead.id),
-        status: newStatus,
+        status: resolvedStatus,
       });
 
       await updateLeadOnAPI(lead.id, payload);
@@ -2037,7 +2059,7 @@ function openEditStatusModal(leadId) {
       };
       
       const oldKey = getDashboardKey(previousStatus);
-      const newKey = getDashboardKey(newStatus);
+      const newKey = getDashboardKey(resolvedStatus);
       
       // Update dashboard stats
       if (dashboardStats[oldKey] !== undefined) {
@@ -2058,21 +2080,21 @@ function openEditStatusModal(leadId) {
         dashboardStats["NF Beauftragung"] = Math.max(0, (dashboardStats["NF Beauftragung"] || 0) - 1);
       }
       
-      if (newStatus === "Beauftragung") {
+      if (resolvedStatus === "Beauftragung") {
         dashboardStats.Beauftragung = (dashboardStats.Beauftragung || 0) + 1;
-      } else if (newStatus === "EA Beauftragung") {
+      } else if (resolvedStatus === "EA Beauftragung") {
         dashboardStats["EA Beauftragung"] = (dashboardStats["EA Beauftragung"] || 0) + 1;
-      } else if (newStatus === "NF Beauftragung") {
+      } else if (resolvedStatus === "NF Beauftragung") {
         dashboardStats["NF Beauftragung"] = (dashboardStats["NF Beauftragung"] || 0) + 1;
       }
 
       // Update the lead object
-      lead.status = newStatus;
-      lead.statusClass = getStatusClass(newStatus);
+      lead.status = resolvedStatus;
+      lead.statusClass = getStatusClass(resolvedStatus);
       
       // Queue pending update
       queuePendingUpdate(lead.id, {
-        status: newStatus,
+        status: resolvedStatus,
         statusClass: lead.statusClass,
       });
 
@@ -2080,8 +2102,8 @@ function openEditStatusModal(leadId) {
       activityCache.delete(String(lead.id));
       notesCache.delete(String(lead.id));
       
-      console.log(`Lead ${leadId} status updated from ${previousStatus} to ${newStatus}`);
-      showToast(`Status wurde auf ${newStatus} gesetzt`, "success", 2200);
+      console.log(`Lead ${leadId} status updated from ${previousStatus} to ${resolvedStatus}`);
+      showToast(`Status wurde auf ${resolvedStatus} gesetzt`, "success", 2200);
       
       // Re-render everything
       saveJsonCache(KUNDEN_DASHBOARD_CACHE_KEY, dashboardStats);
@@ -3040,6 +3062,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
 
   function saveStatusUpdate() {
     const newStatus = document.getElementById("statusModalSelect")?.value;
+    const resolvedStatus = getCanonicalStatus(newStatus);
     if (!newStatus) {
       alert("Bitte Status wählen");
       return;
@@ -3047,9 +3070,9 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
 
     const lead = leadsData.find((l) => l.id === statusModalLeadId);
     if (lead) {
-      lead.status = newStatus;
-      lead.statusClass = getStatusClass(newStatus);
-      console.log(`Lead ${statusModalLeadId} status updated to ${newStatus}`);
+      lead.status = resolvedStatus;
+      lead.statusClass = getStatusClass(resolvedStatus);
+      console.log(`Lead ${statusModalLeadId} status updated to ${resolvedStatus}`);
     }
 
     const modal = document.getElementById("statusModal");
@@ -3326,6 +3349,9 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
                 <option value="">Status auswählen</option>
                 <option value="TNE Offen">TNE Offen</option>
                 <option value="in Bearbeitung">in Bearbeitung</option>
+                <option value="Auftragsbestätigung-Offen">Auftragsbestätigung-Offen</option>
+                <option value="Auftragsbestätigung-in Bearbeitung">Auftragsbestätigung-in Bearbeitung</option>
+                <option value="Auftragsbestätigung-follow up">Auftragsbestätigung-follow up</option>
                 <option value="Nur Info eingeholt">Nur Info eingeholt</option>
                 <option value="falscher Kunde">falscher Kunde</option>
               </select>
