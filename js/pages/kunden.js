@@ -192,19 +192,19 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
   const client_STATUS_OPTIONS = [
     "in Bearbeitung",
     "Offen",
-    "Auftragsbestätigung-Offen",
+    "Auftragsbestätigung-EA Beauftragung",
     "Nur Info eingeholt",
     "falscher Kunde",
   ];
   const BEARBEITUNG_STATUS_OPTIONS = [
     "follow up",
-    "Auftragsbestätigung-in Bearbeitung",
+    "Auftragsbestätigung-Beauftragung",
     "EA Beauftragung",
     "Beauftragung",
     "NF Beauftragung",
   ];
   const FOLLOW_UP_STATUS_OPTIONS = [
-    "Auftragsbestätigung-follow up",
+    "Auftragsbestätigung-NF Beauftragung",
     "Ghoster",
     "Abgesagt",
     "Abgesagt tot",
@@ -1689,9 +1689,50 @@ function protectFilterDropdowns() {
     return String(mappedStatus ?? trimmedStatus).trim();
   }
 
+  function isAuftragsbestaetigungStatus(status) {
+    const normalized = normalizeStatusValue(status);
+    return [
+      "auftragsbestätigung",
+      "auftragsbestatigung",
+      "auftragsbestätigung-offen",
+      "auftragsbestatigung-offen",
+      "auftragsbestätigung-in bearbeitung",
+      "auftragsbestatigung-in bearbeitung",
+      "auftragsbestätigung-follow up",
+      "auftragsbestatigung-follow up",
+      "auftragsbestätigung-ea beauftragung",
+      "auftragsbestatigung-ea beauftragung",
+      "auftragsbestätigung-nf beauftragung",
+      "auftragsbestatigung-nf beauftragung",
+      "auftragsbestätigung-beauftragung",
+      "auftragsbestatigung-beauftragung",
+    ].includes(normalized);
+  }
+
+  function getAuftragsbestaetigungTargetStatus(status) {
+    const normalized = normalizeStatusValue(status);
+    if (
+      normalized.includes("ea beauftragung") ||
+      normalized.includes("ea beauftragt")
+    ) {
+      return "EA Beauftragung";
+    }
+    if (
+      normalized.includes("nf beauftragung") ||
+      normalized.includes("nf beauftragt")
+    ) {
+      return "NF Beauftragung";
+    }
+    if (normalized.includes("beauftragung")) {
+      return "Beauftragung";
+    }
+    return "";
+  }
+
   function getStatusClass(status) {
     const statusLower = normalizeStatusValue(status);
     if (!statusLower) return "badge-neutral";
+    if (isAuftragsbestaetigungStatus(status)) return "badge-beauft";
     if (statusLower === "follow up") return "badge-follow";
     if (statusLower === "offen") return "badge-offen";
     if (statusLower === "tne offen") return "badge-offen";
@@ -1765,8 +1806,10 @@ function protectFilterDropdowns() {
         key: "auftrags",
         label: "Auftragsbestätigung",
         icon: "📞",
-        count: getCountOrFallback("Auftragsbestätigung", "Auftragsbestätigung"),
-        filter: (l) => statusMatches(l.status, "Auftragsbestätigung"),
+        count: leadsData.length
+          ? leadsData.filter((lead) => isAuftragsbestaetigungStatus(lead.status)).length
+          : getCountOrFallback("Auftragsbestätigung", "Auftragsbestätigung"),
+        filter: (l) => isAuftragsbestaetigungStatus(l.status),
       },
       {
         key: "beauft",
@@ -2216,10 +2259,11 @@ function openEditStatusModal(leadId) {
     }
 
     if (kundenActiveFilter === "auftrags") {
+      const targetStatus = getAuftragsbestaetigungTargetStatus(lead.status);
       return {
         title: "AuftragsbestÃ¤tigung",
         placeholder: "WÃ¤hlen Sie eine Option...",
-        options: AUFTRAGSBESTAETIGUNG_STATUS_OPTIONS,
+        options: targetStatus ? [targetStatus, "Storniert"] : AUFTRAGSBESTAETIGUNG_STATUS_OPTIONS,
       };
     }
 
