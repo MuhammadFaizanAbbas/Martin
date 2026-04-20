@@ -1680,7 +1680,7 @@ function protectFilterDropdowns() {
     const trimmedStatus = String(rawStatus || "").trim();
     const mappedStatus =
       STATUS_MAPPING[trimmedStatus] ?? STATUS_MAPPING[rawStatus];
-    return getCanonicalStatus(mappedStatus ?? trimmedStatus);
+    return String(mappedStatus ?? trimmedStatus).trim();
   }
 
   function getStatusClass(status) {
@@ -1760,7 +1760,7 @@ function protectFilterDropdowns() {
         label: "Auftragsbestätigung",
         icon: "📞",
         count: getCountOrFallback("Auftragsbestätigung", "Auftragsbestätigung"),
-        filter: (l) => l.status === "Auftragsbestätigung",
+        filter: (l) => statusMatches(l.status, "Auftragsbestätigung"),
       },
       {
         key: "beauft",
@@ -2266,16 +2266,17 @@ function openEditStatusModal(leadId) {
   });
   
   saveBtn?.addEventListener('click', async () => {
-    const newStatus = document.getElementById("editStatusSelect")?.value;
+    const newStatus = String(document.getElementById("editStatusSelect")?.value || "").trim();
     const resolvedStatus = getCanonicalStatus(newStatus);
     const previousStatus = lead.status;
+    const previousCanonicalStatus = getCanonicalStatus(previousStatus);
 
     if (!newStatus) {
       showToast("Bitte wählen Sie einen Status aus", "error", 2200);
       return;
     }
 
-    if (resolvedStatus === previousStatus) {
+    if (newStatus === previousStatus) {
       closeModal();
       return;
     }
@@ -2287,7 +2288,7 @@ function openEditStatusModal(leadId) {
       const payload = buildLeadUpdatePayload(lead, {
         id: String(lead.id),
         lead_id: String(lead.id),
-        status: resolvedStatus,
+        status: newStatus,
       });
 
       await updateLeadOnAPI(lead.id, payload);
@@ -2304,7 +2305,7 @@ function openEditStatusModal(leadId) {
         return canonicalStatus;
       };
       
-      const oldKey = getDashboardKey(previousStatus);
+      const oldKey = getDashboardKey(previousCanonicalStatus);
       const newKey = getDashboardKey(resolvedStatus);
       
       // Update dashboard stats
@@ -2318,11 +2319,11 @@ function openEditStatusModal(leadId) {
       }
       
       // Also update the multi-status counts for Beauftragung if needed
-      if (previousStatus === "Beauftragung") {
+      if (previousCanonicalStatus === "Beauftragung") {
         dashboardStats.Beauftragung = Math.max(0, (dashboardStats.Beauftragung || 0) - 1);
-      } else if (previousStatus === "EA Beauftragung") {
+      } else if (previousCanonicalStatus === "EA Beauftragung") {
         dashboardStats["EA Beauftragung"] = Math.max(0, (dashboardStats["EA Beauftragung"] || 0) - 1);
-      } else if (previousStatus === "NF Beauftragung") {
+      } else if (previousCanonicalStatus === "NF Beauftragung") {
         dashboardStats["NF Beauftragung"] = Math.max(0, (dashboardStats["NF Beauftragung"] || 0) - 1);
       }
       
@@ -2335,12 +2336,12 @@ function openEditStatusModal(leadId) {
       }
 
       // Update the lead object
-      lead.status = resolvedStatus;
-      lead.statusClass = getStatusClass(resolvedStatus);
+      lead.status = newStatus;
+      lead.statusClass = getStatusClass(newStatus);
       
       // Queue pending update
       queuePendingUpdate(lead.id, {
-        status: resolvedStatus,
+        status: newStatus,
         statusClass: lead.statusClass,
       });
 
@@ -2348,8 +2349,8 @@ function openEditStatusModal(leadId) {
       activityCache.delete(String(lead.id));
       notesCache.delete(String(lead.id));
       
-      console.log(`Lead ${leadId} status updated from ${previousStatus} to ${resolvedStatus}`);
-      showToast(`Status wurde auf ${resolvedStatus} gesetzt`, "success", 2200);
+      console.log(`Lead ${leadId} status updated from ${previousStatus} to ${newStatus}`);
+      showToast(`Status wurde auf ${newStatus} gesetzt`, "success", 2200);
       
       // Re-render everything
       saveJsonCache(KUNDEN_DASHBOARD_CACHE_KEY, dashboardStats);
@@ -3317,8 +3318,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
   };
 
   function saveStatusUpdate() {
-    const newStatus = document.getElementById("statusModalSelect")?.value;
-    const resolvedStatus = getCanonicalStatus(newStatus);
+    const newStatus = String(document.getElementById("statusModalSelect")?.value || "").trim();
     if (!newStatus) {
       alert("Bitte Status wählen");
       return;
@@ -3326,9 +3326,9 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
 
     const lead = leadsData.find((l) => l.id === statusModalLeadId);
     if (lead) {
-      lead.status = resolvedStatus;
-      lead.statusClass = getStatusClass(resolvedStatus);
-      console.log(`Lead ${statusModalLeadId} status updated to ${resolvedStatus}`);
+      lead.status = newStatus;
+      lead.statusClass = getStatusClass(newStatus);
+      console.log(`Lead ${statusModalLeadId} status updated to ${newStatus}`);
     }
 
     const modal = document.getElementById("statusModal");
