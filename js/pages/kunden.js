@@ -1990,7 +1990,7 @@ function protectFilterDropdowns() {
           emails: webhookRecipients,
           names: webhookRecipientNames,
           action: selectedTemplate,
-          source:"Martin",
+          source: "Martin",
         });
 
         console.log("Kunden bulk email webhook success:", webhookResult);

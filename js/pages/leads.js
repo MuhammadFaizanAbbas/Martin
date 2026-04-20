@@ -2323,7 +2323,7 @@ async function updateLeadOnAPI(id, payload) {
         emails: recipients,
         names: recipientNames,
         action: selectedEmailTemplate,
-        source,
+        source: "Martin",
       });
 
       console.log("Bulk email webhook success:", webhookResult);
