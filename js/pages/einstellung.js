@@ -5,8 +5,7 @@ const einstellungPage = (function () {
   const DELEGATION_RULES_KEY = "msdach-user-delegations-v1";
   const UPDATE_DELEGIEREN_SAME = "/api/update_delegieren";
   const UPDATE_DELEGIEREN_DIRECT = "https://goarrow.ai/test/update_delegieren.php";
-  const UPDATE_DELEGIEREN_PROXY = `https://corsproxy.io/?${encodeURIComponent(UPDATE_DELEGIEREN_DIRECT)}`;
-  const UPDATE_DELEGIEREN_ALT_PROXY = `https://api.allorigins.win/raw?url=${encodeURIComponent(UPDATE_DELEGIEREN_DIRECT)}`;
+  const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
   const ASSIGNEE_OPTIONS = ["Philipp", "André", "Martin", "Simon"];
   const DEFAULT_USERS = [
     { id: 1, vorname: "Martin", nachname: "Schwaak", email: "admin@msdach.com", passwort: "********", rolle: "admin", active: true, delegatedTo: "" },
@@ -82,13 +81,32 @@ const einstellungPage = (function () {
   }
 
   async function updateDelegierenOnAPI(bearbeiter, delegieren) {
-    const formData = new URLSearchParams();
-    formData.append("bearbeiter", String(bearbeiter || "").trim());
-    formData.append("delegieren", String(delegieren || "").trim());
-
     const jsonPayload = {
       bearbeiter: String(bearbeiter || "").trim(),
       delegieren: String(delegieren || "").trim(),
+    };
+
+    const parseApiResponse = async (response) => {
+      const text = await response.text();
+      let payload = null;
+
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          payload = { status: text.trim().toLowerCase() === "false" ? "error" : "success", raw: text };
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(payload?.message || `HTTP ${response.status}`);
+      }
+
+      if (!text || text.trim().toLowerCase() === "false" || payload?.status === "error" || payload?.success === false) {
+        throw new Error(payload?.message || "Delegieren Update fehlgeschlagen");
+      }
+
+      return payload || { status: "success" };
     };
 
     try {
@@ -101,63 +119,30 @@ const einstellungPage = (function () {
         body: JSON.stringify(jsonPayload),
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const text = await response.text();
-      if (!text || text.trim().toLowerCase() === "false") {
-        throw new Error("Backend returned false");
-      }
-
-      try {
-        return JSON.parse(text);
-      } catch {
-        return { status: "success", raw: text };
-      }
+      return await parseApiResponse(response);
     } catch (error) {
-      console.warn("Same-origin delegieren update failed, trying fallbacks:", error?.message || error);
-    }
-
-    const endpoints = [
-      UPDATE_DELEGIEREN_DIRECT,
-      UPDATE_DELEGIEREN_PROXY,
-      UPDATE_DELEGIEREN_ALT_PROXY,
-    ];
-
-    let lastError = null;
-
-    for (const endpoint of endpoints) {
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Accept: "application/json, text/plain, */*",
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: formData.toString(),
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const text = await response.text();
-        if (!text || text.trim().toLowerCase() === "false") {
-          throw new Error("Backend returned false");
-        }
-
-        try {
-          return JSON.parse(text);
-        } catch {
-          return { status: "success", raw: text };
-        }
-      } catch (error) {
-        lastError = error;
+      const isLocalDev = LOCAL_HOSTS.has(window.location.hostname);
+      if (!isLocalDev) {
+        throw new Error(error?.message || "Delegieren Update fehlgeschlagen");
       }
+
+      console.warn("Same-origin delegieren update failed in local dev, trying direct fallback:", error?.message || error);
     }
 
-    throw new Error(lastError?.message || "Delegieren Update fehlgeschlagen");
+    const formData = new URLSearchParams();
+    formData.append("bearbeiter", jsonPayload.bearbeiter);
+    formData.append("delegieren", jsonPayload.delegieren);
+
+    const response = await fetch(UPDATE_DELEGIEREN_DIRECT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formData.toString(),
+    });
+
+    return await parseApiResponse(response);
   }
 
   const getHTML = () => `

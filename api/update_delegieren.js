@@ -49,15 +49,30 @@ export default async function handler(req, res) {
     });
 
     const text = await upstream.text();
-    let json;
+    let payload;
     try {
-      json = JSON.parse(text);
+      payload = JSON.parse(text);
     } catch {
-      json = { status: "success", raw: text };
+      payload = { status: text && text.trim().toLowerCase() !== "false" ? "success" : "error", raw: text };
     }
 
     res.setHeader("Cache-Control", "no-store");
-    return res.status(200).json(json);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({
+        status: "error",
+        message: payload?.message || payload?.raw || `Upstream request failed with HTTP ${upstream.status}`,
+      });
+    }
+
+    if (!text || text.trim().toLowerCase() === "false" || payload?.status === "error" || payload?.success === false) {
+      return res.status(502).json({
+        status: "error",
+        message: payload?.message || "Delegieren update was rejected by upstream",
+        raw: text,
+      });
+    }
+
+    return res.status(200).json(payload);
   } catch (err) {
     return res.status(500).json({ status: "error", message: err.message });
   }
