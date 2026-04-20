@@ -2329,7 +2329,7 @@ async function updateLeadOnAPI(id, payload) {
       console.log("Bulk email webhook success:", webhookResult);
       document.getElementById("massEmailModal")?.classList.remove("active");
       showToast(
-        `${selectedEmailTemplate} bulk email ${recipients.length} Empfänger ko send trigger ho gaya`,
+        `${selectedEmailTemplate} bulk email ${recipients.length} Empfänger successfully triggered`,
         "success",
         3000,
       );

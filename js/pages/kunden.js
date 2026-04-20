@@ -1995,7 +1995,7 @@ function protectFilterDropdowns() {
 
         console.log("Kunden bulk email webhook success:", webhookResult);
         showToast(
-          `${selectedTemplate} bulk email ${validEmailData.length} EmpfÃ¤nger ko send trigger ho gaya`,
+          `${selectedTemplate} bulk email ${validEmailData.length} EmpfÃ¤nger successfully triggered`,
           "success",
           3000,
         );
