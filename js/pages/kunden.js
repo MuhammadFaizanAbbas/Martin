@@ -1961,7 +1961,7 @@ function protectFilterDropdowns() {
     }
   }
 
-  async function triggerBulkEmailWebhook({ emails, names, action, source }) {
+async function triggerBulkEmailWebhook({ emails, names, action, source }) {
     const payload = {
       emails: emails.join(","),
       names: names.join(","),
@@ -2003,22 +2003,105 @@ function protectFilterDropdowns() {
     }
   }
 
+  function buildBulkEmailActivityText({ actor, template, email, recipientLabel, isBulk }) {
+    const modeLabel = isBulk ? "Bulk-E-Mail" : "E-Mail";
+    return buildEmailActivityText({
+      actor,
+      template,
+      email,
+      recipientLabel,
+      modeLabel,
+      eventLabel: "gesendet",
+      timestampLabel: new Date().toLocaleString("de-DE"),
+    });
+    const safeActor = String(actor || "System").trim() || "System";
+    const safeTemplate = String(template || "").trim();
+    const safeEmail = String(email || "").trim();
+    const safeRecipient = String(recipientLabel || "").trim();
+
+    return [
+      `${safeActor} hat ${modeLabel} gesendet.`,
+      safeRecipient ? `Empfänger: ${safeRecipient}` : "",
+      safeEmail ? `E-Mail: ${safeEmail}` : "",
+      safeTemplate ? `Vorlage: ${safeTemplate}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  function buildEmailActivityText({
+    actor,
+    template,
+    email,
+    recipientLabel,
+    modeLabel = "E-Mail",
+    eventLabel = "gesendet",
+    timestampLabel = "",
+  }) {
+    const safeActor = String(actor || "System").trim() || "System";
+    const safeTemplate = String(template || "").trim();
+    const safeEmail = String(email || "").trim();
+    const safeRecipient = String(recipientLabel || "").trim();
+    const safeTimestamp = String(timestampLabel || "").trim();
+
+    return [
+      `${safeActor} hat ${modeLabel} ${eventLabel}.`,
+      safeRecipient ? `Empfänger: ${safeRecipient}` : "",
+      safeEmail ? `E-Mail: ${safeEmail}` : "",
+      safeTemplate ? `Vorlage: ${safeTemplate}` : "",
+      `Gesendet von: ${safeActor}`,
+      safeTimestamp ? `Zeitpunkt: ${safeTimestamp}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  function buildOpenedEmailActivityText({ actor, email, recipientLabel }) {
+    return buildEmailActivityText({
+      actor,
+      template: "Standard",
+      email,
+      recipientLabel,
+      modeLabel: "E-Mail",
+      eventLabel: "geöffnet",
+      timestampLabel: new Date().toLocaleString("de-DE"),
+    });
+  }
+
   function openMassEmailModal() {
     if (selectedKunden.size === 0) return;
     
     const selectedLeads = leadsData.filter(lead => selectedKunden.has(lead.id));
+    const recipientCardsHtml = selectedLeads
+      .map((lead) => {
+        const displayName = `${lead.salutation ? `${lead.salutation} ` : ""}${lead.name || "—"}`.trim();
+        return `
+          <div class="mass-email-recipient-card">
+            <div class="mass-email-recipient-row">
+              <span class="mass-email-recipient-label">Name</span>
+              <span class="mass-email-recipient-value">${escapeHtml(displayName || "—")}</span>
+            </div>
+            <div class="mass-email-recipient-row">
+              <span class="mass-email-recipient-label">Email</span>
+              <span class="mass-email-recipient-value">${escapeHtml(lead.email || "—")}</span>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
     
     const modalHtml = `
       <div id="massEmailModal" class="k-modal-overlay">
-        <div class="k-modal-content" style="max-width: 650px;">
+        <div class="k-modal-content mass-email-modal-content" style="max-width: 920px;">
           <div class="k-modal-header">
             <h3>Senden Sie Massen-E-Mails</h3>
             <button class="k-close-btn" id="closeMassEmailModal">&times;</button>
           </div>
-          <div class="k-modal-body">
-            <div class="form-group" style="margin-bottom: 20px;">
-              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Choose an E-Mail</label>
+          <div class="k-modal-body mass-email-modal-body">
+            <div class="form-group mass-email-template-group">
+              <label class="mass-email-field-label">E-Mail Vorlage</label>
               <select id="email-template-select" class="k-full-select">
+                <option value="">Choose an E-Mail</option>
                 <option value="E1">E1</option>
                 <option value="E2">E2</option>
                 <option value="E3">E3</option>
@@ -2031,24 +2114,9 @@ function protectFilterDropdowns() {
                 <option value="E10">E10</option>
               </select>
             </div>
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">Name</label>
-              <div style="padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; color: #0f172a;">
-                ${selectedLeads.map(lead => {
-                  const displayName = (lead.salutation ? lead.salutation + " " : "") + lead.name;
-                  return `<div style="margin-bottom: 5px;">${escapeHtml(displayName)}</div>`;
-                }).join('')}
-              </div>
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-              <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #0f172a;">E-Mail</label>
-              <div style="padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; color: #0f172a;">
-                ${selectedLeads.map(lead => {
-                  return `<div style="margin-bottom: 5px;">${escapeHtml(lead.email || "—")}</div>`;
-                }).join('')}
-              </div>
+
+            <div class="mass-email-recipient-list">
+              ${recipientCardsHtml}
             </div>
             
             <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
@@ -2121,6 +2189,49 @@ function protectFilterDropdowns() {
           names: webhookRecipientNames,
           action: selectedTemplate,
           source: "Martin",
+        });
+
+        const activityTimestamp = new Date().toLocaleString();
+        const isBulkSend = validEmailData.length > 1;
+        const activityResults = await Promise.allSettled(
+          validEmailData.map(async (item) => {
+            const lead = selectedLeads.find(
+              (entry) => String(entry.id) === String(item.id),
+            );
+            const actor = resolveActivityActorForLead(
+              item.id,
+              lead?.bearbeiter || source,
+            );
+            const activityText = buildBulkEmailActivityText({
+              actor,
+              template: selectedTemplate,
+              email: item.email,
+              recipientLabel: item.name,
+              isBulk: isBulkSend,
+            });
+
+            addOptimisticActivity(item.id, {
+              text: activityText,
+              by: actor,
+              at: activityTimestamp,
+            });
+
+            return insertActivity(item.id, "email", activityText, {
+              bearbeiter: actor,
+              from: actor,
+              email: item.email,
+              leadName: item.name,
+            });
+          }),
+        );
+
+        activityResults.forEach((result) => {
+          if (result.status === "rejected") {
+            console.warn(
+              "Kunden bulk email activity could not be stored:",
+              result.reason?.message || result.reason,
+            );
+          }
         });
 
         console.log("Kunden bulk email webhook success:", webhookResult);
@@ -2967,19 +3078,21 @@ const payload = {
     }
 
     const actor = resolveActivityActorForLead(lead.id, lead.bearbeiter);
-    const activityText = rewriteActivityTextActor(
-      `${actor} öffnete E-Mail an ${email}`,
+    const recipientLabel = `${lead.salutation ? `${lead.salutation} ` : ""}${lead.name || ""}`.trim();
+    const emailActivityText = buildOpenedEmailActivityText({
       actor,
-    );
+      email,
+      recipientLabel,
+    });
 
     addOptimisticActivity(lead.id, {
-      text: activityText,
+      text: emailActivityText,
       by: actor,
-      at: new Date().toLocaleString(),
+      at: new Date().toLocaleString("de-DE"),
     });
 
     try {
-      await insertActivity(lead.id, "email", activityText, {
+      await insertActivity(lead.id, "email", emailActivityText, {
         bearbeiter: actor,
         from: actor,
         email,
@@ -3550,6 +3663,16 @@ function saveStatusUpdate() {
       .k-close-btn { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: #94a3b8; line-height: 1; }
       .k-modal-body { flex: 1; overflow-y: auto; padding: 24px; }
       .k-full-select { width: 100%; padding: 11px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 0.9rem; background: white; color: #64748b; }
+      .mass-email-modal-content { max-height: 88vh; }
+      .mass-email-modal-body { background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); }
+      .mass-email-template-group { margin-bottom: 22px; }
+      .mass-email-field-label { display: block; margin-bottom: 10px; font-size: 0.95rem; font-weight: 600; color: #475569; }
+      .mass-email-recipient-list { display: flex; flex-direction: column; gap: 16px; }
+      .mass-email-recipient-card { background: #fff; border: 1px solid #dbe5f1; border-radius: 24px; padding: 18px 22px; box-shadow: 0 10px 25px rgba(15, 23, 42, 0.04); }
+      .mass-email-recipient-row { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 14px 2px; border-bottom: 1px solid #dbe5f1; }
+      .mass-email-recipient-row:last-child { border-bottom: none; padding-bottom: 4px; }
+      .mass-email-recipient-label { font-size: 0.82rem; font-weight: 500; color: #64748b; }
+      .mass-email-recipient-value { font-size: 0.98rem; font-weight: 700; color: #1e293b; text-align: right; word-break: break-word; }
       .k-full-input { width: 100%; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem; font-family: inherit; }
       .k-full-input:focus { outline: none; border-color: #22c55e; }
       .k-btn-green { background: #22c55e; color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
@@ -3567,7 +3690,7 @@ function saveStatusUpdate() {
       .timeline-item { display: flex; gap: 12px; padding: 12px; border-bottom: 1px solid #f1f5f9; }
       .timeline-icon { width: 32px; height: 32px; background: #f1f5f9; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
       .timeline-content { flex: 1; }
-      .timeline-text { font-size: 0.85rem; color: #0f172a; margin-bottom: 4px; }
+      .timeline-text { font-size: 0.85rem; color: #0f172a; margin-bottom: 4px; white-space: pre-line; }
       .timeline-meta { display: flex; flex-direction: column; gap: 12px; font-size: 0.7rem; color: #64748b; }
       .timeline-activity{display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #475569;}
       .timeline-activity-date{display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #475569;}
@@ -3589,6 +3712,8 @@ function saveStatusUpdate() {
         .filter-section { flex-direction: column; align-items: stretch; } 
         .filter-group select, .filter-group input { width: 100%; } 
         .filter-actions { margin-left: 0; }
+        .mass-email-recipient-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+        .mass-email-recipient-value { text-align: left; }
         .table-wrap { overflow-x: auto; }
         #kunden-table { min-width: 800px; }
       }

@@ -872,6 +872,33 @@
     activityCache.set(key, merged);
   }
 
+  function buildEmailActivityText({
+    actor,
+    template,
+    email,
+    recipientLabel,
+    modeLabel = "E-Mail",
+    eventLabel = "gesendet",
+    timestampLabel = "",
+  }) {
+    const safeActor = String(actor || "System").trim() || "System";
+    const safeTemplate = String(template || "").trim();
+    const safeEmail = String(email || "").trim();
+    const safeRecipient = String(recipientLabel || "").trim();
+    const safeTimestamp = String(timestampLabel || "").trim();
+
+    return [
+      `${safeActor} hat ${modeLabel} ${eventLabel}.`,
+      safeRecipient ? `Empfänger: ${safeRecipient}` : "",
+      safeEmail ? `E-Mail: ${safeEmail}` : "",
+      safeTemplate ? `Vorlage: ${safeTemplate}` : "",
+      `Gesendet von: ${safeActor}`,
+      safeTimestamp ? `Zeitpunkt: ${safeTimestamp}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
   async function insertActivity(leadId, activityType, activityText, meta = {}) {
     const actor = resolveActivityActor(meta.from || meta.user || meta.author);
     const payload = {
@@ -2297,7 +2324,7 @@ async function updateLeadOnAPI(id, payload) {
         showToast("Keine E-Mail-Adresse vorhanden", "error", 2000);
         return;
       }
-      leadsWithEmails = [{ name, email }];
+      leadsWithEmails = [{ id: lead?.id, name, email }];
     } else {
       // Get selected leads emails
       const selectedLeadsList = fullLeadsData.filter((lead) =>
@@ -2341,6 +2368,46 @@ async function updateLeadOnAPI(id, payload) {
         names: recipientNames,
         action: selectedEmailTemplate,
         source: "Martin",
+      });
+
+      const activityTimestamp = new Date().toLocaleString("de-DE");
+      const isBulkSend = leadsWithEmails.length > 1;
+      const activityResults = await Promise.allSettled(
+        leadsWithEmails.map(async (item) => {
+          const leadId = item?.id;
+          if (leadId == null) return;
+          const actor = resolveActivityActor(currentBearbeiter);
+          const activityText = buildEmailActivityText({
+            actor,
+            template: selectedEmailTemplate,
+            email: item.email,
+            recipientLabel: item.name,
+            modeLabel: isBulkSend ? "Bulk-E-Mail" : "E-Mail",
+            eventLabel: "gesendet",
+            timestampLabel: activityTimestamp,
+          });
+
+          addOptimisticActivity(leadId, {
+            text: activityText,
+            by: actor,
+            at: activityTimestamp,
+          });
+
+          return insertActivity(leadId, "email", activityText, {
+            from: actor,
+            email: item.email,
+            leadName: item.name,
+          });
+        }),
+      );
+
+      activityResults.forEach((result) => {
+        if (result.status === "rejected") {
+          console.warn(
+            "Bulk email activity could not be stored:",
+            result.reason?.message || result.reason,
+          );
+        }
       });
 
       console.log("Bulk email webhook success:", webhookResult);
@@ -2764,7 +2831,15 @@ async function updateLeadOnAPI(id, payload) {
     }
 
     const actor = resolveActivityActor(lead.bearbeiter);
-    const activityText = `${actor} öffnete E-Mail an ${email}`;
+    const activityText = buildEmailActivityText({
+      actor,
+      template: "Standard",
+      email,
+      recipientLabel: leadName,
+      modeLabel: "E-Mail",
+      eventLabel: "geöffnet",
+      timestampLabel: new Date().toLocaleString("de-DE"),
+    });
     addOptimisticActivity(id, {
       text: activityText,
       by: actor,
