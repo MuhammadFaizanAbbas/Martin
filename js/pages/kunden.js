@@ -172,9 +172,9 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
     "follow up",
     "Offen",
     "In Bearbeitung",
-    "Auftragsbestätigung-follow up",
-    "Auftragsbestätigung-Offen",
-    "Auftragsbestätigung-in Bearbeitung",
+    "Auftragsbestätigung-EA Beauftragung",
+    "Auftragsbestätigung-Beauftragung",
+    "Auftragsbestätigung-NF Beauftragung",
     "Infos eingeholt",
     "Beauftragung",
     "Beauftragt",
@@ -3691,9 +3691,9 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
                 <option value="">Status auswählen</option>
                 <option value="TNE Offen">TNE Offen</option>
                 <option value="in Bearbeitung">in Bearbeitung</option>
-                <option value="Auftragsbestätigung-Offen">Auftragsbestätigung-Offen</option>
-                <option value="Auftragsbestätigung-in Bearbeitung">Auftragsbestätigung-in Bearbeitung</option>
-                <option value="Auftragsbestätigung-follow up">Auftragsbestätigung-follow up</option>
+                <option value="Auftragsbestätigung-EA Beauftragung">Auftragsbestätigung-EA Beauftragung</option>
+                <option value="Auftragsbestätigung-Beauftragung">Auftragsbestätigung-Beauftragung</option>
+                <option value="Auftragsbestätigung-NF Beauftragung">Auftragsbestätigung-NF Beauftragung</option>
                 <option value="Nur Info eingeholt">Nur Info eingeholt</option>
                 <option value="falscher Kunde">falscher Kunde</option>
               </select>
