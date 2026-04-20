@@ -55,6 +55,7 @@
           <option value="follow up">follow up</option>
           <option value="Offen">Offen</option>
           <option value="In Bearbeitung">In Bearbeitung</option>
+          <option value="Auftragsbestätigung">Auftragsbestätigung</option>
           <option value="Infos eingeholt">Infos eingeholt</option>
           <option value="Beauftragung">Beauftragung</option>
           <option value="Beauftragt">Beauftragt</option>
@@ -1156,6 +1157,34 @@
     return "badge-offen";
   }
 
+  function normalizeStatusValue(status) {
+    return String(status || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+  }
+
+  function getCanonicalStatus(status) {
+    const normalized = normalizeStatusValue(status);
+    if (!normalized) return "";
+    if (normalized === "follow up") return "follow up";
+    if (normalized === "offen") return "Offen";
+    if (normalized === "in bearbeitung") return "In Bearbeitung";
+    if (
+      normalized === "auftragsbestätigung" ||
+      normalized === "auftragsbestatigung" ||
+      normalized === "auftragsbestätigung-offen" ||
+      normalized === "auftragsbestätigung-in bearbeitung" ||
+      normalized === "auftragsbestätigung-follow up" ||
+      normalized === "auftragsbestatigung-offen" ||
+      normalized === "auftragsbestatigung-in bearbeitung" ||
+      normalized === "auftragsbestatigung-follow up"
+    ) {
+      return "Auftragsbestätigung";
+    }
+    return String(status || "").trim();
+  }
+
   function firstNonEmpty(...values) {
     for (const value of values) {
       const normalized = String(value ?? "").trim();
@@ -1960,7 +1989,9 @@ async function updateLeadOnAPI(id, payload) {
     }
 
     if (currentStatus) {
-      filtered = filtered.filter((lead) => lead.status === currentStatus);
+      filtered = filtered.filter(
+        (lead) => getCanonicalStatus(lead.status) === getCanonicalStatus(currentStatus),
+      );
     }
 
     if (currentQuelle) {
