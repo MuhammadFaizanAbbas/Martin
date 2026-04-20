@@ -1656,7 +1656,10 @@ function protectFilterDropdowns() {
       normalized === "auftragsbestätigung" ||
       normalized === "auftragsbestätigung-offen" ||
       normalized === "auftragsbestätigung-in bearbeitung" ||
-      normalized === "auftragsbestätigung-follow up"
+      normalized === "auftragsbestätigung-follow up" ||
+      normalized === "auftragsbestätigung-ea beauftragung" ||
+      normalized === "auftragsbestätigung-beauftragung" ||
+      normalized === "auftragsbestätigung-nf beauftragung"
     ) {
       return "Auftragsbestätigung";
     }
@@ -1756,6 +1759,62 @@ function protectFilterDropdowns() {
     )
       return "badge-beauft";
     return "badge-neutral";
+  }
+
+  function getDashboardKeyForStatus(status) {
+    const canonicalStatus = getCanonicalStatus(status);
+    if (canonicalStatus === "follow up") return "follow up";
+    if (canonicalStatus === "in Bearbeitung") return "in Bearbeitung";
+    if (canonicalStatus === "Offen") return "Offen";
+    if (canonicalStatus === "Nur Info eingeholt") return "Nur Info eingeholt";
+    if (canonicalStatus === "falscher Kunde") return "falscher Kunde";
+    return canonicalStatus;
+  }
+
+  function applyLeadStatusTransition(lead, newStatus, previousStatus = lead?.status) {
+    if (!lead) return;
+
+    const previousCanonicalStatus = getCanonicalStatus(previousStatus);
+    const resolvedStatus = getCanonicalStatus(newStatus);
+    const oldKey = getDashboardKeyForStatus(previousCanonicalStatus);
+    const newKey = getDashboardKeyForStatus(resolvedStatus);
+
+    if (oldKey && dashboardStats[oldKey] !== undefined) {
+      dashboardStats[oldKey] = Math.max(0, (dashboardStats[oldKey] || 0) - 1);
+    }
+    if (newKey) {
+      if (dashboardStats[newKey] !== undefined) {
+        dashboardStats[newKey] = (dashboardStats[newKey] || 0) + 1;
+      } else {
+        dashboardStats[newKey] = 1;
+      }
+    }
+
+    if (previousCanonicalStatus === "Beauftragung") {
+      dashboardStats.Beauftragung = Math.max(0, (dashboardStats.Beauftragung || 0) - 1);
+    } else if (previousCanonicalStatus === "EA Beauftragung") {
+      dashboardStats["EA Beauftragung"] = Math.max(0, (dashboardStats["EA Beauftragung"] || 0) - 1);
+    } else if (previousCanonicalStatus === "NF Beauftragung") {
+      dashboardStats["NF Beauftragung"] = Math.max(0, (dashboardStats["NF Beauftragung"] || 0) - 1);
+    }
+
+    if (resolvedStatus === "Beauftragung") {
+      dashboardStats.Beauftragung = (dashboardStats.Beauftragung || 0) + 1;
+    } else if (resolvedStatus === "EA Beauftragung") {
+      dashboardStats["EA Beauftragung"] = (dashboardStats["EA Beauftragung"] || 0) + 1;
+    } else if (resolvedStatus === "NF Beauftragung") {
+      dashboardStats["NF Beauftragung"] = (dashboardStats["NF Beauftragung"] || 0) + 1;
+    }
+
+    lead.status = newStatus;
+    lead.statusClass = getStatusClass(newStatus);
+
+    queuePendingUpdate(lead.id, {
+      status: newStatus,
+      statusClass: lead.statusClass,
+    });
+
+    saveJsonCache(KUNDEN_DASHBOARD_CACHE_KEY, dashboardStats);
   }
 
   function isInBearbeitungStatus(status) {
@@ -2331,9 +2390,7 @@ function openEditStatusModal(leadId) {
   
   saveBtn?.addEventListener('click', async () => {
     const newStatus = String(document.getElementById("editStatusSelect")?.value || "").trim();
-    const resolvedStatus = getCanonicalStatus(newStatus);
     const previousStatus = lead.status;
-    const previousCanonicalStatus = getCanonicalStatus(previousStatus);
 
     if (!newStatus) {
       showToast("Bitte wählen Sie einen Status aus", "error", 2200);
@@ -2356,58 +2413,7 @@ function openEditStatusModal(leadId) {
       });
 
       await updateLeadOnAPI(lead.id, payload);
-
-      // IMPORTANT: Update dashboard stats BEFORE updating the lead object
-      // Map status to dashboard keys
-      const getDashboardKey = (status) => {
-        const canonicalStatus = getCanonicalStatus(status);
-        if (canonicalStatus === "follow up") return "follow up";
-        if (canonicalStatus === "in Bearbeitung") return "in Bearbeitung";
-        if (canonicalStatus === "Offen") return "Offen";
-        if (canonicalStatus === "Nur Info eingeholt") return "Nur Info eingeholt";
-        if (canonicalStatus === "falscher Kunde") return "falscher Kunde";
-        return canonicalStatus;
-      };
-      
-      const oldKey = getDashboardKey(previousCanonicalStatus);
-      const newKey = getDashboardKey(resolvedStatus);
-      
-      // Update dashboard stats
-      if (dashboardStats[oldKey] !== undefined) {
-        dashboardStats[oldKey] = Math.max(0, (dashboardStats[oldKey] || 0) - 1);
-      }
-      if (dashboardStats[newKey] !== undefined) {
-        dashboardStats[newKey] = (dashboardStats[newKey] || 0) + 1;
-      } else {
-        dashboardStats[newKey] = 1;
-      }
-      
-      // Also update the multi-status counts for Beauftragung if needed
-      if (previousCanonicalStatus === "Beauftragung") {
-        dashboardStats.Beauftragung = Math.max(0, (dashboardStats.Beauftragung || 0) - 1);
-      } else if (previousCanonicalStatus === "EA Beauftragung") {
-        dashboardStats["EA Beauftragung"] = Math.max(0, (dashboardStats["EA Beauftragung"] || 0) - 1);
-      } else if (previousCanonicalStatus === "NF Beauftragung") {
-        dashboardStats["NF Beauftragung"] = Math.max(0, (dashboardStats["NF Beauftragung"] || 0) - 1);
-      }
-      
-      if (resolvedStatus === "Beauftragung") {
-        dashboardStats.Beauftragung = (dashboardStats.Beauftragung || 0) + 1;
-      } else if (resolvedStatus === "EA Beauftragung") {
-        dashboardStats["EA Beauftragung"] = (dashboardStats["EA Beauftragung"] || 0) + 1;
-      } else if (resolvedStatus === "NF Beauftragung") {
-        dashboardStats["NF Beauftragung"] = (dashboardStats["NF Beauftragung"] || 0) + 1;
-      }
-
-      // Update the lead object
-      lead.status = newStatus;
-      lead.statusClass = getStatusClass(newStatus);
-      
-      // Queue pending update
-      queuePendingUpdate(lead.id, {
-        status: newStatus,
-        statusClass: lead.statusClass,
-      });
+      applyLeadStatusTransition(lead, newStatus, previousStatus);
 
       // Clear caches to force refresh
       activityCache.delete(String(lead.id));
@@ -2417,7 +2423,6 @@ function openEditStatusModal(leadId) {
       showToast(`Status wurde auf ${newStatus} gesetzt`, "success", 2200);
       
       // Re-render everything
-      saveJsonCache(KUNDEN_DASHBOARD_CACHE_KEY, dashboardStats);
       renderStats();  // Update stats display first
       renderKunden(); // Then re-render the table (this applies the active filter)
       closeModal();
@@ -2639,6 +2644,7 @@ function openEditStatusModal(leadId) {
         showToast("Updating lead...", "info", 1000);
         
         const editId = String(lead.id).trim();
+        const previousStatus = lead.status;
         if (!editId || editId === "null" || editId === "undefined") {
           throw new Error("Lead ID fehlt");
         }
@@ -2711,6 +2717,9 @@ const payload = {
         
         queuePendingUpdate(lead.id, updatedLead);
         Object.assign(lead, updatedLead);
+        if (payload.status !== previousStatus) {
+          applyLeadStatusTransition(lead, payload.status, previousStatus);
+        }
 
         applyErstberatungState(
           lead.id,
@@ -2718,6 +2727,7 @@ const payload = {
         );
         
         showToast("Lead erfolgreich aktualisiert!", "success", 2000);
+        renderStats();
         renderKunden();
         closeModal();
         
@@ -3381,7 +3391,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
     if (modal) modal.classList.add("active");
   };
 
-  function saveStatusUpdate() {
+function saveStatusUpdate() {
     const newStatus = String(document.getElementById("statusModalSelect")?.value || "").trim();
     if (!newStatus) {
       alert("Bitte Status wählen");
@@ -3390,13 +3400,13 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
 
     const lead = leadsData.find((l) => l.id === statusModalLeadId);
     if (lead) {
-      lead.status = newStatus;
-      lead.statusClass = getStatusClass(newStatus);
+      applyLeadStatusTransition(lead, newStatus, lead.status);
       console.log(`Lead ${statusModalLeadId} status updated to ${newStatus}`);
     }
 
     const modal = document.getElementById("statusModal");
     if (modal) modal.classList.remove("active");
+    renderStats();
     renderKunden();
   }
 
