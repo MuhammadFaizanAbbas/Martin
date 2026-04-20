@@ -137,6 +137,8 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
   let isLoading = false;
   let pendingUpdates = loadPendingUpdates();
   let autoRefreshIntervalId = null;
+  let currentNotesId = null;
+  let currentViewLeadId = null;
   
   // New filter states
   let statusFilter = "";
@@ -854,7 +856,13 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
       if (v !== undefined && v !== null) params.append(k, String(v));
     });
     try {
-      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
+      if (!shouldTrySameOriginApi()) {
+        throw new Error("Static localhost without /api");
+      }
+      console.log("[kunden notes][POST] same-origin request", {
+        url: NOTES_INSERT_SAME,
+        body,
+      });
       const res = await fetch(NOTES_INSERT_SAME, {
         method: "POST",
         headers: {
@@ -865,25 +873,42 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      console.log("[kunden notes][POST] same-origin response", data);
       return data;
     } catch (err) {
+      console.warn("[kunden notes][POST] same-origin failed", err.message);
+      const proxyUrls = [
+        `https://corsproxy.io/?${encodeURIComponent(INSERT_NOTE_DIRECT)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(INSERT_NOTE_DIRECT)}`,
+      ];
       try {
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_NOTE_DIRECT)}`;
-        const res = await fetch(proxyUrl, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: params,
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const textResp = await res.text();
-        try {
-          return JSON.parse(textResp);
-        } catch {
-          return { status: "success", raw: textResp };
+        for (const proxyUrl of proxyUrls) {
+          try {
+            console.log("[kunden notes][POST] proxy request", {
+              url: proxyUrl,
+              body: params.toString(),
+            });
+            const res = await fetch(proxyUrl, {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: params,
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const textResp = await res.text();
+            console.log("[kunden notes][POST] proxy raw response", textResp);
+            try {
+              return JSON.parse(textResp);
+            } catch {
+              return { status: "success", raw: textResp };
+            }
+          } catch (proxyErr) {
+            console.warn("[kunden notes][POST] proxy failed", proxyUrl, proxyErr.message);
+          }
         }
+        throw new Error("All note POST endpoints failed");
       } catch (proxyErr) {
         throw new Error(`Notiz konnte nicht gespeichert werden: ${proxyErr.message}`);
       }
@@ -939,8 +964,24 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
 
   async function fetchNotesForLead(leadId) {
     if (notesCache.has(String(leadId))) {
+      console.log("[kunden notes][GET] cache hit", {
+        leadId,
+        notes: notesCache.get(String(leadId)),
+      });
       return notesCache.get(String(leadId));
     }
+
+    const cacheBust = `_ts=${Date.now()}`;
+
+    const syncLeadNotes = (normalized) => {
+      const leadKey = String(leadId);
+      leadsData.forEach((lead) => {
+        if (String(lead.id) === leadKey) lead.notes = normalized;
+      });
+      fullLeadsData.forEach((lead) => {
+        if (String(lead.id) === leadKey) lead.notes = normalized;
+      });
+    };
 
     const normalizeNotes = (data) => {
       const list = Array.isArray(data) ? data : (data?.data || data?.notes || []);
@@ -970,29 +1011,52 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
 
     if (shouldTrySameOriginApi()) {
       try {
-        const res = await fetch(`${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`, {
-          headers: { Accept: 'application/json' }
+        const sameOriginUrl = `${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`;
+        console.log("[kunden notes][GET] same-origin request", sameOriginUrl);
+        const res = await fetch(sameOriginUrl, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const normalized = normalizeNotes(await res.json());
+        const data = await res.json();
+        console.log("[kunden notes][GET] same-origin response", data);
+        const normalized = normalizeNotes(data);
         notesCache.set(String(leadId), normalized);
+        syncLeadNotes(normalized);
         return normalized;
-      } catch {}
+      } catch (err) {
+        console.warn("[kunden notes][GET] same-origin failed", err.message);
+      }
     }
 
-    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}`;
-    for (const url of getRemoteJsonProxyUrls(target)) {
+    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`;
+    console.log("[kunden notes][GET] direct target", target);
+    const proxyUrls = [
+      ...getRemoteJsonProxyUrls(target),
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+    ];
+    for (const url of proxyUrls) {
       try {
-        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        console.log("[kunden notes][GET] proxy request", url);
+        const r = await fetch(url, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const normalized = normalizeNotes(await r.json()).map((n) => ({
+        const data = await r.json();
+        console.log("[kunden notes][GET] proxy response", data);
+        const normalized = normalizeNotes(data).map((n) => ({
           ...n,
-          author: n.author || 'System',
+          author: n.author || "System",
         }));
         notesCache.set(String(leadId), normalized);
+        syncLeadNotes(normalized);
         return normalized;
-      } catch {}
+      } catch (err) {
+        console.warn("[kunden notes][GET] proxy failed", url, err.message);
+      }
     }
+    console.warn("[kunden notes][GET] no notes response received", { leadId });
     return [];
   }
 
@@ -1057,6 +1121,129 @@ async function fetchActivityForLead(leadId) {
     }
     return [];
 }
+
+  function renderLeadNote(note) {
+    const author = String(
+      note?.author ||
+      note?.created_by ||
+      note?.createdBy ||
+      note?.by ||
+      note?.user ||
+      note?.name ||
+      ""
+    ).trim();
+    const date = String(note?.date || note?.created_at || note?.createdAt || "").trim();
+    const metaParts = [
+      author ? `<span>created_by: <strong>${escapeHtml(author)}</strong></span>` : "",
+      date ? `<span>${escapeHtml(date)}</span>` : "",
+    ].filter(Boolean);
+
+    return `<div class="note-card">
+    <div class="note-text">${escapeHtml(note?.text || "")}</div>
+    <div class="note-meta">${metaParts.join("")}</div>
+    </div>`;
+  }
+
+  function findLeadById(leadId) {
+    const leadKey = String(leadId);
+    return (
+      leadsData.find((lead) => String(lead.id) === leadKey) ||
+      fullLeadsData.find((lead) => String(lead.id) === leadKey) ||
+      null
+    );
+  }
+
+  function syncLeadNotesState(leadId, notes) {
+    const leadKey = String(leadId);
+    leadsData.forEach((lead) => {
+      if (String(lead.id) === leadKey) lead.notes = notes;
+    });
+    fullLeadsData.forEach((lead) => {
+      if (String(lead.id) === leadKey) lead.notes = notes;
+    });
+    notesCache.set(leadKey, notes);
+  }
+
+  function renderNotesList() {
+    const lead = findLeadById(currentNotesId);
+    const list = document.getElementById("notesList");
+    const cachedNotes = notesCache.get(String(currentNotesId));
+    const notes = Array.isArray(cachedNotes)
+      ? cachedNotes
+      : Array.isArray(lead?.notes)
+        ? lead.notes
+        : [];
+    if (!list) return;
+    if (!notes.length) {
+      list.innerHTML = '<div class="empty-state">Noch keine Notizen vorhanden.</div>';
+      return;
+    }
+    list.innerHTML = notes.map(renderLeadNote).join("");
+  }
+
+  async function refreshKundeViewNotesIfOpen(leadId) {
+    if (String(currentViewLeadId) !== String(leadId)) return;
+    await window.viewKunde(leadId);
+  }
+
+  function saveNote() {
+    const input = document.getElementById("noteInput");
+    const txt = String(input?.value || "").trim();
+    if (!txt) return;
+    const lead = findLeadById(currentNotesId);
+    if (!lead) return;
+
+    createNoteForLead(currentNotesId, txt)
+      .then(async () => {
+        const actor = getCurrentUserName();
+        const optimisticNote = {
+          text: txt,
+          author: actor,
+          created_by: actor,
+          date: new Date().toLocaleString(),
+        };
+        const existingNotes = Array.isArray(lead.notes) ? lead.notes : [];
+        const mergedNotes = [optimisticNote, ...existingNotes];
+        syncLeadNotesState(currentNotesId, mergedNotes);
+        if (input) input.value = "";
+        renderNotesList();
+
+        const activityText = `${actor} hat eine neue Notiz erstellt: ${txt}`;
+        console.log("[kunden notes] creating activity for note", {
+          lead_id: currentNotesId,
+          from: actor,
+          description: activityText,
+        });
+        addOptimisticActivity(currentNotesId, {
+          text: activityText,
+          by: actor,
+          at: new Date().toLocaleString(),
+        });
+        try {
+          await insertActivity(currentNotesId, "note", activityText, {
+            from: actor,
+            author: actor,
+            leadName: lead.name,
+          });
+          activityCache.delete(String(currentNotesId));
+        } catch (activityErr) {
+          console.warn(
+            "[kunden notes] insert_activity failed after note save",
+            activityErr?.message || activityErr,
+          );
+        }
+
+        notesCache.delete(String(currentNotesId));
+        const latestNotes = await fetchNotesForLead(currentNotesId);
+        syncLeadNotesState(currentNotesId, latestNotes);
+        renderNotesList();
+        await refreshKundeViewNotesIfOpen(currentNotesId);
+        showToast("Notiz gespeichert. Synchronisiere…", "success", 2200);
+      })
+      .catch((err) => {
+        showToast(err.message || "Notiz speichern fehlgeschlagen", "error", 3000);
+      });
+  }
 
   async function fetchLeads() {
     const result = await fetchFirstAvailable(
@@ -2505,6 +2692,7 @@ const payload = {
   window.viewKunde = async (id) => {
     const lead = leadsData.find((l) => l.id === id);
     if (!lead) return;
+    currentViewLeadId = id;
     
     const titleEl = document.getElementById("kundenViewTitle");
     const contentEl = document.getElementById("kundenViewContent");
@@ -2728,6 +2916,14 @@ const payload = {
 
   window.openMassEmailModal = openMassEmailModal;
   window.openFullEditModal = openFullEditModal;
+  window.openNotesKunde = (id) => {
+    currentNotesId = id;
+    notesCache.delete(String(id));
+    fetchNotesForLead(id).then(() => renderNotesList());
+    const noteInput = document.getElementById("noteInput");
+    if (noteInput) noteInput.value = "";
+    document.getElementById("notesModal")?.classList.add("active");
+  };
 
   function renderKunden() {
     if (!leadsData.length) {
@@ -2866,6 +3062,12 @@ const payload = {
                 </svg>
               </button>
             ` : ''}
+            <button class="act-btn" onclick="window.openNotesKunde(${lead.id})" title="Notizen">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+              </svg>
+            </button>
           </div>
           </td>
           <td>
@@ -3281,6 +3483,11 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
       .timeline-activity-date{display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #475569;}
       .timeline-author { font-weight: 500; }
       .timeline-date { color: #94a3b8; }
+      .notes-list { max-height: 300px; overflow-y: auto; margin-bottom: 20px; }
+      .note-card { background: #f8fafc; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+      .note-text { font-size: 0.85rem; color: #1e293b; margin-bottom: 8px; }
+      .note-meta { display: flex; gap: 16px; font-size: 0.7rem; color: #64748b; }
+      .notes-input-area textarea { width: 100%; min-height: 100px; resize: vertical; box-sizing: border-box; margin-bottom: 12px; }
       
       @media (max-width: 1200px) {
         #kunden-table th, #kunden-table td { white-space: normal; word-break: break-word; }
@@ -3392,6 +3599,22 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
         </div>
       </div>
 
+      <div id="notesModal" class="k-modal-overlay">
+        <div class="k-modal-content k-modal-sm">
+          <div class="k-modal-header">
+            <h3>Notizen</h3>
+            <button class="k-close-btn" id="closeNotesModal">&times;</button>
+          </div>
+          <div class="k-modal-body">
+            <div id="notesList" class="notes-list"></div>
+            <div class="notes-input-area">
+              <textarea id="noteInput" rows="3" class="k-full-input" placeholder="Notiz hinzufügen..."></textarea>
+              <button id="saveNoteBtn" class="k-btn-green" type="button">Notiz speichern</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="statusModal" class="k-modal-overlay">
         <div class="k-modal-content k-modal-sm">
           <div class="k-modal-header">
@@ -3477,6 +3700,18 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
             .getElementById("kundenViewModal")
             ?.classList.remove("active");
       });
+    document
+      .getElementById("closeNotesModal")
+      ?.addEventListener("click", () => {
+        document.getElementById("notesModal")?.classList.remove("active");
+      });
+    document
+      .getElementById("notesModal")
+      ?.addEventListener("click", (e) => {
+        if (e.target === document.getElementById("notesModal"))
+          document.getElementById("notesModal")?.classList.remove("active");
+      });
+    document.getElementById("saveNoteBtn")?.addEventListener("click", saveNote);
 
     document
       .getElementById("closeStatusModal")
