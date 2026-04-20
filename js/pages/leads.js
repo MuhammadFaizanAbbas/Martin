@@ -28,6 +28,7 @@
   let pendingCreates = []; // Array of temp leads (ids are negative)
   let pendingUpdates = new Map(); // Map<id:string, partialLead>
   const PENDING_KUNDEN_UPDATES_KEY = "kunden-pending-updates-v1";
+  const USER_DELEGATION_RULES_KEY = "msdach-user-delegations-v1";
 
   // Current filters
   let currentSearch = "";
@@ -36,6 +37,21 @@
   let currentBearbeiter = "";  // Add this line
   let currentDelegieren = "";  // Add this line
   let autoRefreshIntervalId = null;
+
+  function getDelegationOverrideForBearbeiter(bearbeiter) {
+    try {
+      const rules = JSON.parse(localStorage.getItem(USER_DELEGATION_RULES_KEY) || "{}");
+      return String(rules?.[String(bearbeiter || "").trim()] || "").trim();
+    } catch {
+      return "";
+    }
+  }
+
+  function resolveLeadDelegation(bearbeiter, delegieren) {
+    const override = getDelegationOverrideForBearbeiter(bearbeiter);
+    if (override) return override;
+    return delegieren || "—";
+  }
 
   // ─────────────────────────────────────────────
   // HTML TEMPLATE
@@ -1285,9 +1301,10 @@
       firstNonEmpty(apiLead.lead_quelle, apiLead.quelle, apiLead.source) || "—";
     const bearbeiter =
       firstNonEmpty(apiLead.bearbeiter, apiLead.owner, apiLead.assignee) || "—";
-    const delegieren =
-      firstNonEmpty(apiLead.delegieren, apiLead.delegate, apiLead.delegated_to) ||
-      "—";
+    const delegieren = resolveLeadDelegation(
+      bearbeiter,
+      firstNonEmpty(apiLead.delegieren, apiLead.delegate, apiLead.delegated_to) || "—",
+    );
     const kategorie =
       firstNonEmpty(apiLead.kategorie, apiLead.sale_typ, apiLead.sales_typ) || "—";
     const netto =

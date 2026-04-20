@@ -7,6 +7,7 @@ const kundenPage = (function () {
   const PENDING_KUNDEN_UPDATES_KEY = "kunden-pending-updates-v1";
   const KUNDEN_LEADS_CACHE_KEY = "kunden-leads-cache-v1";
   const KUNDEN_DASHBOARD_CACHE_KEY = "kunden-dashboard-cache-v1";
+  const USER_DELEGATION_RULES_KEY = "msdach-user-delegations-v1";
 
   // ── API URLs ──────────────────────────────────────────────────────────────
   const SO_LEADS = "/api/all_leads";
@@ -1285,7 +1286,7 @@ async function fetchActivityForLead(leadId) {
           nachfassen: apiLead.nachfassen,
 // In fetchLeads function, already present - line ~1070
           erstberatung_telefon: normalizeErstberatungValue(apiLead.erstberatung_telefon || ""),
-          delegieren: apiLead.delegieren || "—",
+          delegieren: resolveLeadDelegation(apiLead.bearbeiter || "—", apiLead.delegieren),
           plz: apiLead.plz || "",
           angebot: apiLead.angebot || "",
           qualification: apiLead.einschaetzung_kunde || "",
@@ -1334,7 +1335,7 @@ async function fetchActivityForLead(leadId) {
       email: apiLead.email || "",
       nachfassen: apiLead.nachfassen,
       erstberatung_telefon: normalizeErstberatungValue(apiLead.erstberatung_telefon || ""),
-      delegieren: apiLead.delegieren,
+      delegieren: resolveLeadDelegation(apiLead.bearbeiter || "—", apiLead.delegieren),
       plz: apiLead.plz || "",
       angebot: apiLead.angebot || "",
       qualification: apiLead.einschaetzung_kunde || "",
@@ -1690,6 +1691,21 @@ function protectFilterDropdowns() {
     const mappedStatus =
       STATUS_MAPPING[trimmedStatus] ?? STATUS_MAPPING[rawStatus];
     return String(mappedStatus ?? trimmedStatus).trim();
+  }
+
+  function getDelegationOverrideForBearbeiter(bearbeiter) {
+    try {
+      const rules = JSON.parse(localStorage.getItem(USER_DELEGATION_RULES_KEY) || "{}");
+      return String(rules?.[String(bearbeiter || "").trim()] || "").trim();
+    } catch {
+      return "";
+    }
+  }
+
+  function resolveLeadDelegation(bearbeiter, delegieren) {
+    const override = getDelegationOverrideForBearbeiter(bearbeiter);
+    if (override) return override;
+    return delegieren || "—";
   }
 
   function isAuftragsbestaetigungStatus(status) {
