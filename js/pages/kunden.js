@@ -21,6 +21,7 @@ const kundenPage = (function () {
   const UPDATE_API_ALT_PROXY = `https://api.allorigins.win/raw?url=${encodeURIComponent(UPDATE_API_DIRECT)}`;
   const BULK_EMAIL_WEBHOOK_URL =
     "https://msdach.app.n8n.cloud/webhook/send_bulk_emails";
+  const KUNDEN_AUTO_REFRESH_MS = 5 * 60 * 1000;
 
   // Add these lines near other API URLs (around line 20-30)
 const INSERT_ACTIVITY_API = "/api/insert_activity";
@@ -135,6 +136,7 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
   let filteredData = [];
   let isLoading = false;
   let pendingUpdates = loadPendingUpdates();
+  let autoRefreshIntervalId = null;
   
   // New filter states
   let statusFilter = "";
@@ -1225,6 +1227,26 @@ async function fetchActivityForLead(leadId) {
     .catch((e) => {
       console.warn("Dashboard stats load failed", e);
     });
+}
+
+function isKundenPageActive() {
+  const hash = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
+  return hash === "kunden" || hash === "customers";
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshIntervalId) {
+    clearInterval(autoRefreshIntervalId);
+    autoRefreshIntervalId = null;
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  autoRefreshIntervalId = setInterval(() => {
+    if (!isKundenPageActive() || document.hidden) return;
+    loadAllData();
+  }, KUNDEN_AUTO_REFRESH_MS);
 }
 
 // Protect filter dropdowns from being modified by other scripts
@@ -2769,8 +2791,10 @@ const payload = {
     if (searchTerm) {
       data = data.filter(
         (l) =>
-          l.name.toLowerCase().includes(searchTerm) ||
-          l.ort.toLowerCase().includes(searchTerm),
+          String(l.name || "").toLowerCase().includes(searchTerm) ||
+          String(l.ort || "").toLowerCase().includes(searchTerm) ||
+          String(l.email || "").toLowerCase().includes(searchTerm) ||
+          String(l.telefon || "").toLowerCase().includes(searchTerm),
       );
     }
     
@@ -3331,7 +3355,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input type="text" placeholder="Name oder Ort suchen..." id="kunden-search"/>
+            <input type="text" placeholder="Name, Ort, E-Mail oder Telefon suchen..." id="kunden-search"/>
           </div>
           <div class="spacer"></div>
           <button id="mass-email-btn" class="mass-email-btn" onclick="window.openMassEmailModal()" style="display: none;">
@@ -3409,6 +3433,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
   function init(contentEl, titleElement) {
     contentArea = contentEl;
     titleEl = titleElement;
+    stopAutoRefresh();
     addKundenStyles();
 
     if (titleEl) {
@@ -3420,6 +3445,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
     contentArea.innerHTML = getHTML();
 
     loadAllData();
+    startAutoRefresh();
 
     window.applyFilters = () => {
       applyFilters();

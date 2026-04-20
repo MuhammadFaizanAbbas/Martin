@@ -1,6 +1,7 @@
 ﻿const leadsPage = (function () {
   let contentArea = null;
   let titleEl = null;
+  const LEADS_AUTO_REFRESH_MS = 5 * 60 * 1000;
 
   // Leads Data - populated from API
   let leadsData = [];
@@ -34,6 +35,7 @@
   let currentQuelle = "";
   let currentBearbeiter = "";  // Add this line
   let currentDelegieren = "";  // Add this line
+  let autoRefreshIntervalId = null;
 
   // ─────────────────────────────────────────────
   // HTML TEMPLATE
@@ -46,7 +48,7 @@
           <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          <input type="text" placeholder="Suche..." id="search-input"/>
+          <input type="text" placeholder="Name, Ort, E-Mail oder Telefon suchen..." id="search-input"/>
         </div>
         <select class="select-box" id="filter-status">
           <option value="">Alle Status</option>
@@ -1005,6 +1007,26 @@
     await loadPage(1);
   }
 
+  function isLeadsPageActive() {
+    const hash = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
+    return hash === "leads";
+  }
+
+  function stopAutoRefresh() {
+    if (autoRefreshIntervalId) {
+      clearInterval(autoRefreshIntervalId);
+      autoRefreshIntervalId = null;
+    }
+  }
+
+  function startAutoRefresh() {
+    stopAutoRefresh();
+    autoRefreshIntervalId = setInterval(() => {
+      if (!isLeadsPageActive() || document.hidden) return;
+      refreshLeads();
+    }, LEADS_AUTO_REFRESH_MS);
+  }
+
   // After creating a lead, the upstream may take seconds to reflect it.
   // Poll a few times to surface the new data sooner.
   function schedulePostCreateSync() {
@@ -1926,8 +1948,10 @@ async function updateLeadOnAPI(id, payload) {
     if (currentSearch) {
       filtered = filtered.filter(
         (lead) =>
-          lead.name.toLowerCase().includes(currentSearch) ||
-          lead.ort.toLowerCase().includes(currentSearch),
+          String(lead.name || "").toLowerCase().includes(currentSearch) ||
+          String(lead.ort || "").toLowerCase().includes(currentSearch) ||
+          String(lead.email || "").toLowerCase().includes(currentSearch) ||
+          String(lead.telefon || "").toLowerCase().includes(currentSearch),
       );
     }
 
@@ -2844,6 +2868,7 @@ async function updateLeadOnAPI(id, payload) {
   async function init(contentEl, titleElement) {
     contentArea = contentEl;
     titleEl = titleElement;
+    stopAutoRefresh();
     addLeadsStyles();
 
     if (titleEl) {
@@ -2856,6 +2881,7 @@ async function updateLeadOnAPI(id, payload) {
 
     // Initial data load
     await loadPage(1);
+    startAutoRefresh();
 
     // Filter listeners (debounced search)
     let searchTimer;
