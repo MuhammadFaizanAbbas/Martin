@@ -419,7 +419,6 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
       wunsch_farbe: overrides.wunsch_farbe ?? lead?.farbe ?? "",
       dachpfanne: overrides.dachpfanne ?? lead?.dachpfanne ?? "",
       baujahr_dach: overrides.baujahr_dach ?? lead?.dachalter ?? "",
-      zusaetzliche_extras: overrides.zusaetzliche_extras ?? lead?.zusatzExtras ?? "",
       delegieren: overrides.delegieren ?? lead?.delegieren ?? "",
     };
   }
@@ -469,7 +468,6 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
       wunsch_farbe: payload.wunsch_farbe || "",
       dachpfanne: payload.dachpfanne || "",
       baujahr_dach: payload.baujahr_dach || "",
-      zusaetzliche_extras: payload.zusaetzliche_extras || "",
       delegieren: payload.delegieren || "",
     };
 
@@ -1099,7 +1097,6 @@ async function fetchActivityForLead(leadId) {
           angebot: apiLead.angebot || "",
           qualification: apiLead.einschaetzung_kunde || "",
           kontaktVia: apiLead.kontakt_via || "",
-          zusatzExtras: apiLead.zusaetzliche_extras || "",
           salesTyp: apiLead.sale_typ || "",
           notes: [],
           activities: [],
@@ -1149,7 +1146,6 @@ async function fetchActivityForLead(leadId) {
       angebot: apiLead.angebot || "",
       qualification: apiLead.einschaetzung_kunde || "",
       kontaktVia: apiLead.kontakt_via || "",
-      zusatzExtras: apiLead.zusaetzliche_extras || "",
       salesTyp: apiLead.sale_typ || "",
       notes: [],
       activities: [],
@@ -2354,10 +2350,6 @@ function openEditStatusModal(leadId) {
                     ${Array.from({ length: 80 }, (_, i) => 2024 - i).map(y => `<option value="${y}" ${lead.dachalter === String(y) ? 'selected' : ''}>${y}</option>`).join('')}
                   </select>
                 </div>
-                <div class="form-group">
-                  <label>Zusätzliche Extras</label>
-                  <input type="text" id="edit_zusatzExtras" class="k-full-input" value="${escapeHtml(lead.zusatzExtras || '')}">
-                </div>
               </div>
               <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
                 <button type="button" id="cancelFullEdit" class="k-btn-outline">Abbrechen</button>
@@ -2426,7 +2418,6 @@ const payload = {
   wunsch_farbe: document.getElementById("edit_farbe")?.value || '',
   dachpfanne: document.getElementById("edit_dachpfanne")?.value || '',
   baujahr_dach: document.getElementById("edit_baujahr")?.value || '',
-  zusaetzliche_extras: document.getElementById("edit_zusatzExtras")?.value || '',
   sale_typ: document.getElementById("edit_salesTyp")?.value || '',
 };
         
@@ -2462,7 +2453,6 @@ const payload = {
           farbe: payload.wunsch_farbe,
           dachpfanne: payload.dachpfanne,
           dachalter: payload.baujahr_dach,
-          zusatzExtras: payload.zusaetzliche_extras,
           erstberatung_telefon: payload.erstberatung_telefon || lead.erstberatung_telefon || "",
           statusClass: getStatusClass(payload.status),
         };
@@ -2607,7 +2597,6 @@ const payload = {
           <div class="k-detail-row"><div class="k-detail-label">Dachpfanne</div><div class="k-detail-value">${escapeHtml(lead.dachpfanne || "—")}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Wunsch Farbe</div><div class="k-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
           <div class="k-detail-row"><div class="k-detail-label">Dachneigung Grad</div><div class="k-detail-value">${escapeHtml(lead.dachneigung || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Zusätzliche Extras</div><div class="k-detail-value">${escapeHtml(lead.zusatzExtras || "—")}</div></div>
         </div>
         
         <div class="k-view-section">
@@ -3347,6 +3336,7 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
           </div>
           <div class="filter-actions">
             <button class="reset-filter-btn" onclick="window.resetFilters()">Filter zurücksetzen</button>
+            <button class="reset-filter-btn" id="refresh-kunden-btn" type="button">Refresh</button>
           </div>
         </div>
         
@@ -3457,6 +3447,9 @@ function openTeleconsultationModalWithCallback(leadId, checkboxElement, original
     document.getElementById("kunden-search")?.addEventListener("input", () => {
       renderKunden();
     });
+    document
+      .getElementById("refresh-kunden-btn")
+      ?.addEventListener("click", () => loadAllData());
 
     document
       .getElementById("kunden-check-all")

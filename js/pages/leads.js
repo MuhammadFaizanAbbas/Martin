@@ -95,13 +95,20 @@
           <option value="Martin">Martin</option>
           <option value="Simon">Simon</option>
           </select>
-<select class="select-box" id="filter-delegieren">      
+        <select class="select-box" id="filter-delegieren">      
     <option value="">Alle Delegieren</option>
           <option value="Philipp">Philipp</option>
           <option value="André">André</option>
           <option value="Martin">Martin</option>
           <option value="Simon">Simon</option>
           </select>
+        <button type="button" class="btn-secondary" id="refresh-leads-btn">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+            <polyline points="21 3 21 9 15 9"/>
+          </svg>
+          Refresh
+        </button>
         <div class="spacer"></div>
         <button class="btn-primary" id="new-lead-btn">
           <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -319,7 +326,6 @@
           )
             .map((y) => `<option value="${y}">${y}</option>`)
             .join("")}</select></div>
-          <div class="form-group"><label>Zusätzliche Extras</label><input type="text" id="editZusatzExtras" placeholder="Extras"></div>
           <div class="form-group"><label>Sales Typ</label>
           <select id="editSalesTyp">
           <option value="">Wählen...</option>
@@ -1302,7 +1308,6 @@
       farbe: apiLead.wunsch_farbe || "",
       dachpfanne: apiLead.dachpfanne || "",
       baujahr: apiLead.baujahr_dach || "",
-      zusatzExtras: apiLead.zusaetzliche_extras || "",
       salesTyp: apiLead.sale_typ || "",
       notes: [],
     };
@@ -1582,7 +1587,6 @@ async function updateLeadOnAPI(id, payload) {
     wunsch_farbe: payload.wunsch_farbe,
     dachpfanne: payload.dachpfanne,
     baujahr_dach: payload.baujahr_dach,
-    zusaetzliche_extras: payload.zusaetzliche_extras,
  };
 
   Object.keys(mappedPayload).forEach((key) => {
@@ -2489,7 +2493,6 @@ async function updateLeadOnAPI(id, payload) {
     setFieldValue("editFarbe", lead.farbe || "");
     setFieldValue("editDachpfanne", lead.dachpfanne || "");
     setFieldValue("editBaujahr", lead.baujahr || "");
-    setFieldValue("editZusatzExtras", lead.zusatzExtras || "");
     setFieldValue("editSalesTyp", lead.salesTyp || "");
 
     openPanel("Lead bearbeiten");
@@ -2531,7 +2534,7 @@ async function updateLeadOnAPI(id, payload) {
       <div class="view-detail-row"><div class="view-detail-label">Dachpfanne</div><div class="view-detail-value">${escapeHtml(lead.dachpfanne || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Wunsch Farbe</div><div class="view-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
       <div class="view-detail-row"><div class="view-detail-label">Dachneigung Grad</div><div class="view-detail-value">${escapeHtml(lead.dachneigung || "—")}</div></div>
-      <div class="view-detail-row"><div class="view-detail-label">Zusätzliche Extras</div><div class="view-detail-value">${escapeHtml(lead.zusatzExtras || "—")}</div></div>`;
+      `;
     const notesEl = document.getElementById("viewTabNotes");
     if (notesEl) {
       notesEl.innerHTML =
@@ -2772,7 +2775,6 @@ async function updateLeadOnAPI(id, payload) {
       farbe: val("editFarbe"),
       dachpfanne: val("editDachpfanne"),
       baujahr: val("editBaujahr"),
-      zusatzExtras: val("editZusatzExtras"),
       salesTyp: val("editSalesTyp"),
     };
   }
@@ -2905,6 +2907,9 @@ async function updateLeadOnAPI(id, payload) {
     document
       .getElementById("filter-delegieren")
       ?.addEventListener("change", applyFilters);
+    document
+      .getElementById("refresh-leads-btn")
+      ?.addEventListener("click", () => refreshLeads());
 
     // Rows per page change listener
     document
@@ -3008,7 +3013,6 @@ if (currentEditId) {
       wunsch_farbe: data.farbe,
       dachpfanne: data.dachpfanne,
       baujahr_dach: data.baujahr,
-      zusaetzliche_extras: data.zusatzExtras,
       sale_typ: data.salesTyp,
 
     };
@@ -3064,7 +3068,6 @@ if (currentEditId) {
             wunsch_farbe: data.farbe,
             dachpfanne: data.dachpfanne,
             baujahr_dach: data.baujahr,
-            zusaetzliche_extras: data.zusatzExtras,
             sale_typ: data.salesTyp,
 
           };
