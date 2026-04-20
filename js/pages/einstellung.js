@@ -3,6 +3,7 @@ const einstellungPage = (function () {
   let titleEl = null;
   const USERS_STORAGE_KEY = "msdach-users-v1";
   const DELEGATION_RULES_KEY = "msdach-user-delegations-v1";
+  const UPDATE_DELEGIEREN_SAME = "/api/update_delegieren";
   const UPDATE_DELEGIEREN_DIRECT = "https://goarrow.ai/test/update_delegieren.php";
   const UPDATE_DELEGIEREN_PROXY = `https://corsproxy.io/?${encodeURIComponent(UPDATE_DELEGIEREN_DIRECT)}`;
   const UPDATE_DELEGIEREN_ALT_PROXY = `https://api.allorigins.win/raw?url=${encodeURIComponent(UPDATE_DELEGIEREN_DIRECT)}`;
@@ -84,6 +85,39 @@ const einstellungPage = (function () {
     const formData = new URLSearchParams();
     formData.append("bearbeiter", String(bearbeiter || "").trim());
     formData.append("delegieren", String(delegieren || "").trim());
+
+    const jsonPayload = {
+      bearbeiter: String(bearbeiter || "").trim(),
+      delegieren: String(delegieren || "").trim(),
+    };
+
+    try {
+      const response = await fetch(UPDATE_DELEGIEREN_SAME, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(jsonPayload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const text = await response.text();
+      if (!text || text.trim().toLowerCase() === "false") {
+        throw new Error("Backend returned false");
+      }
+
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { status: "success", raw: text };
+      }
+    } catch (error) {
+      console.warn("Same-origin delegieren update failed, trying fallbacks:", error?.message || error);
+    }
 
     const endpoints = [
       UPDATE_DELEGIEREN_DIRECT,
