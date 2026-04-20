@@ -211,6 +211,12 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
     "NF Beauftragung",
     "Contact Sign In",
   ];
+  const AUFTRAGSBESTAETIGUNG_STATUS_OPTIONS = [
+    "Beauftragung",
+    "EA Beauftragung",
+    "NF Beauftragung",
+    "Storniert",
+  ];
   const BEAUFTRAGUNG_STATUS_OPTIONS = [
     "Storniert",
   ];
@@ -1767,14 +1773,20 @@ function protectFilterDropdowns() {
         label: "Beauftragung",
         isMulti: true,
         counts: {
-          beauftragung: dashboardStats.Beauftragung || 0,
-          eaBeauftragung: dashboardStats["EA Beauftragung"] || 0,
-          nfBeauftragung: dashboardStats["NF Beauftragung"] || 0,
+          beauftragung: leadsData.length
+            ? getStatusCount("Beauftragung")
+            : dashboardStats.Beauftragung || 0,
+          eaBeauftragung: leadsData.length
+            ? getStatusCount("EA Beauftragung")
+            : dashboardStats["EA Beauftragung"] || 0,
+          nfBeauftragung: leadsData.length
+            ? getStatusCount("NF Beauftragung")
+            : dashboardStats["NF Beauftragung"] || 0,
         },
         filter: (l) =>
-          ["Beauftragung", "EA Beauftragung", "NF Beauftragung"].includes(
-            l.status,
-          ),
+          statusMatches(l.status, "Beauftragung") ||
+          statusMatches(l.status, "EA Beauftragung") ||
+          statusMatches(l.status, "NF Beauftragung"),
       },
     ];
   }
@@ -2200,6 +2212,14 @@ function openEditStatusModal(leadId) {
         title: "Nachverfolgen",
         placeholder: "Wählen Sie eine Option...",
         options: FOLLOW_UP_STATUS_OPTIONS,
+      };
+    }
+
+    if (kundenActiveFilter === "auftrags") {
+      return {
+        title: "AuftragsbestÃ¤tigung",
+        placeholder: "WÃ¤hlen Sie eine Option...",
+        options: AUFTRAGSBESTAETIGUNG_STATUS_OPTIONS,
       };
     }
 
