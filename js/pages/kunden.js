@@ -1129,6 +1129,57 @@ async function fetchActivityForLead(leadId) {
     return [];
 }
 
+  function splitActivityTimestamp(activityAt) {
+    const raw = String(activityAt || "").trim();
+    if (!raw) {
+      return { date: "Kein Datum", time: "Keine Zeit" };
+    }
+
+    const normalized = raw.replace(/\s+/g, " ").trim();
+    const localeMatch = normalized.match(/^(\d{1,2}\.\d{1,2}\.\d{4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?)$/);
+    if (localeMatch) {
+      return { date: localeMatch[1], time: localeMatch[2] };
+    }
+
+    const isoMatch = normalized.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)/);
+    if (isoMatch) {
+      return { date: isoMatch[1], time: isoMatch[2] };
+    }
+
+    const commaParts = normalized.split(",");
+    if (commaParts.length >= 2) {
+      return {
+        date: commaParts[0].trim() || "Kein Datum",
+        time: commaParts.slice(1).join(",").trim() || "Keine Zeit",
+      };
+    }
+
+    const spaceParts = normalized.split(" ");
+    if (spaceParts.length >= 2) {
+      return {
+        date: spaceParts[0].trim() || "Kein Datum",
+        time: spaceParts.slice(1).join(" ").trim() || "Keine Zeit",
+      };
+    }
+
+    return { date: normalized, time: "Keine Zeit" };
+  }
+
+  function formatActivityDescription(activity) {
+    const text = String(activity?.text || "").trim();
+    const actor = String(activity?.by || "").trim() || "Bearbeiter";
+    if (!text) return "Keine Beschreibung";
+
+    const emailMatch = text.match(/E-Mail:\s*([^\n]+)/i);
+    const openedEmailMatch = text.match(/hat\s+E-Mail\s+geöffnet/i);
+    if (openedEmailMatch && emailMatch?.[1]) {
+      return `${actor} öffnete E-Mail an ${emailMatch[1].trim()}`;
+    }
+
+    const firstLine = text.split("\n").map((line) => line.trim()).find(Boolean);
+    return firstLine || text;
+  }
+
   function renderLeadNote(note) {
     const author = String(
       note?.author ||
@@ -1838,13 +1889,11 @@ function protectFilterDropdowns() {
   }
 
   function shouldShowPhoneIcon() {
-    if (kundenActiveFilter === "bearbeitung") return false;
     if (kundenActiveFilter === "beauft") return false;
     return true;
   }
 
   function shouldShowEmailIcon() {
-    if (kundenActiveFilter === "offen") return false;
     if (kundenActiveFilter === "beauft") return false;
     return true;
   }
@@ -2932,24 +2981,29 @@ const payload = {
       
       let activitiesHtml = '';
       if (activities && activities.length > 0) {
-        activitiesHtml = activities.map(activity => `
-          <div class="timeline-item">
-            <div class="timeline-content">
-              <div class="timeline-text">${escapeHtml(activity.text)}</div>
-              <div class="timeline-meta">
-<div class="timeline-activity">
-  <div class="timeline-activity-label">Activity from:</div>
-  <span class="timeline-author">${escapeHtml(activity.by)}</span>
-</div>
-<div class="timeline-activity-date">
-  <div class="timeline-activity-label">Activity Time:</div>
-  <span class="timeline-date">${escapeHtml(activity.at || 'Kein Datum')}</span>
-</div>
-              </div>
-                </div>
+        activitiesHtml = activities.map(activity => {
+          const activityStamp = splitActivityTimestamp(activity.at);
+          return `
+          <div class="activity-card">
+            <div class="activity-row">
+              <div class="activity-label">From</div>
+              <div class="activity-value">${escapeHtml(activity.by || 'Bearbeiter unbekannt')}</div>
+            </div>
+            <div class="activity-row">
+              <div class="activity-label">Description</div>
+              <div class="activity-value activity-description">${escapeHtml(formatActivityDescription(activity))}</div>
+            </div>
+            <div class="activity-row">
+              <div class="activity-label">Activity Date</div>
+              <div class="activity-value">${escapeHtml(activityStamp.date)}</div>
+            </div>
+            <div class="activity-row">
+              <div class="activity-label">Activity Time</div>
+              <div class="activity-value">${escapeHtml(activityStamp.time)}</div>
             </div>
           </div>
-        `).join('');
+        `;
+        }).join('');
       } else {
         activitiesHtml = `<div class="empty-activities">Keine Aktivitäten vorhanden</div>`;
       }
@@ -2998,7 +3052,7 @@ const payload = {
         
         <div class="k-view-section">
           <h4>⏱️ Aktivitätszeitleiste</h4>
-          <div class="timeline-container">
+          <div class="timeline-container activity-timeline-wrap">
             ${activitiesHtml}
           </div>
         </div>
@@ -3696,6 +3750,14 @@ function saveStatusUpdate() {
       .timeline-activity-date{display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #475569;}
       .timeline-author { font-weight: 500; }
       .timeline-date { color: #94a3b8; }
+      .activity-timeline-wrap { max-height: none; overflow: visible; }
+      .activity-card { background: #f8fbff; border: 1px solid #d8e2ef; border-radius: 18px; overflow: hidden; box-shadow: none; margin-bottom: 16px; }
+      .activity-card:last-child { margin-bottom: 0; }
+      .activity-row { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 28px; align-items: center; padding: 18px 28px; border-bottom: 1px solid #e6edf5; }
+      .activity-row:last-child { border-bottom: none; }
+      .activity-label { font-size: 0.95rem; font-weight: 700; color: #6a7f9f; text-align: center; }
+      .activity-value { font-size: 0.98rem; color: #1e293b; text-align: center; }
+      .activity-description { white-space: pre-line; line-height: 1.45; }
       .notes-list { max-height: 300px; overflow-y: auto; margin-bottom: 20px; }
       .note-card { background: #f8fafc; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
       .note-text { font-size: 0.85rem; color: #1e293b; margin-bottom: 8px; }
@@ -3707,6 +3769,9 @@ function saveStatusUpdate() {
         .expand-grid { grid-template-columns: repeat(2, 1fr); }
       }
       @media (max-width: 768px) { 
+        .activity-row { grid-template-columns: 1fr; gap: 8px; padding: 14px 16px; }
+        .activity-label { text-align: left; }
+        .activity-value { text-align: left; }
         .expand-grid { grid-template-columns: repeat(1, 1fr); } 
         .k-modal-content { width: 96%; } 
         .filter-section { flex-direction: column; align-items: stretch; } 
