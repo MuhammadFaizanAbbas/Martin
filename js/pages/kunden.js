@@ -2285,7 +2285,7 @@ async function triggerBulkEmailWebhook({ emails, names, action, source }) {
 
         console.log("Kunden bulk email webhook success:", webhookResult);
         showToast(
-          `${selectedTemplate} bulk email ${validEmailData.length} EmpfÃ¤nger successfully triggered`,
+          `${selectedTemplate} bulk email ${validEmailData.length} Empfänger  successfully triggered`,
           "success",
           3000,
         );
@@ -3116,7 +3116,7 @@ const payload = {
 
     const email = String(lead.email || "").trim();
     if (!email) {
-      showToast("Is customer ke liye email address available nahi hai.", "error", 2500);
+      showToast("Für diesen Kunden ist keine E-Mail-Adresse verfügbar.", "error", 2500);
       return;
     }
 
