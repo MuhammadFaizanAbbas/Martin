@@ -10,7 +10,65 @@ export default async function handler(req, res) {
     return res.status(405).json({ status: 'error', message: 'Method Not Allowed' });
   }
 
-  const target = 'https://goarrow.ai/test/insert_lead.php';
+  const target = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads';
+  const serviceRole = process.env.SERVICE_ROLE;
+  const allowedColumns = new Set([
+    'id',
+    'name',
+    'erstberatung_telefon',
+    'strasse_objekt',
+    'angebot',
+    'plz',
+    'ort',
+    'telefon',
+    'email',
+    'status',
+    'einschaetzung_kunde',
+    'lead_quelle',
+    'kontakt_via',
+    'datum',
+    'nachfassen',
+    'bearbeiter',
+    'delegieren',
+    'summe_netto',
+    'dachflaeche_m2',
+    'dachneigung_grad',
+    'dacheindeckung',
+    'wunsch_farbe',
+    'dachpfanne',
+    'baujahr_dach',
+    'sale_typ',
+  ]);
+
+  if (!serviceRole) {
+    return res.status(500).json({ status: 'error', message: 'Missing SERVICE_ROLE env var' });
+  }
+
+  async function fetchNextLeadId() {
+    const idLookupUrl = `${target}?select=id&order=id.desc&limit=1`;
+    const response = await fetch(idLookupUrl, {
+      headers: {
+        Accept: 'application/json',
+        apikey: serviceRole,
+        Authorization: `Bearer ${serviceRole}`,
+      },
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(text || `Supabase HTTP ${response.status}`);
+    }
+
+    let json = [];
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = [];
+    }
+
+    const maxId = Array.isArray(json) && json.length ? Number(json[0]?.id) : 0;
+    return Number.isFinite(maxId) ? maxId + 1 : 1;
+  }
 
   try {
     // Parse body defensively: Vercel functions may provide raw string
@@ -25,24 +83,58 @@ export default async function handler(req, res) {
     }
     if (body == null || typeof body !== 'object') body = {};
 
-    const params = new URLSearchParams();
-    Object.entries(body).forEach(([k, v]) => {
-      if (v !== undefined && v !== null) params.append(k, String(v));
+    const filteredBody = {};
+    const droppedFields = [];
+    Object.entries(body).forEach(([key, value]) => {
+      if (!allowedColumns.has(key)) {
+        droppedFields.push(key);
+        return;
+      }
+      if (value === undefined || value === null) return;
+      filteredBody[key] = value;
     });
+
+    if (filteredBody.summe_netto != null && filteredBody.summe_netto !== '') {
+      filteredBody.summe_netto = String(filteredBody.summe_netto)
+        .replace(/[^\d,.-]/g, '')
+        .replace(/\./g, '')
+        .replace(/,/g, '.')
+        .trim();
+    }
+
+    if (filteredBody.id == null || String(filteredBody.id).trim() === '') {
+      filteredBody.id = await fetchNextLeadId();
+    }
 
     const upstream = await fetch(target, {
       method: 'POST',
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+        'apikey': serviceRole,
+        'Authorization': `Bearer ${serviceRole}`,
+      },
+      body: JSON.stringify(filteredBody),
     });
 
     const text = await upstream.text();
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({
+        status: 'error',
+        message: text || `Supabase HTTP ${upstream.status}`,
+      });
+    }
     let json;
     try { json = JSON.parse(text); }
     catch { json = { status: 'success', raw: text }; }
 
     res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).json(json);
+    return res.status(200).json({
+      status: 'success',
+      data: json,
+      dropped_fields: droppedFields,
+    });
   } catch (err) {
     return res.status(500).json({ status: 'error', message: err.message });
   }

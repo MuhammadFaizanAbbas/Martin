@@ -17,6 +17,7 @@ const App = (function() {
         'reports': 'berichte',
         'customers': 'kunden',
         'settings': 'einstellung',
+        'provisions': 'provisions',
         // Allow identities
         'anruferin': 'anruferin',
         'berichte': 'berichte',
@@ -24,6 +25,7 @@ const App = (function() {
         'einstellung': 'einstellung',
         'leads': 'leads',
         'dashboard': 'dashboard',
+       
       };
       const resolvedName = ALIASES[pageName] || pageName;
       

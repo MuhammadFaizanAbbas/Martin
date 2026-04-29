@@ -2,6 +2,8 @@
 const dashboardPage = (function() {
   let contentArea = null;
   let titleEl = null;
+  const LOCAL_DEV_API_ORIGIN = 'http://127.0.0.1:3000';
+  const LEADS_CACHE_KEY = 'msdach-leads-cache-v1';
 
   const getHTML = () => `
     <div class="dashboard-container">
@@ -404,6 +406,113 @@ const dashboardPage = (function() {
     return `€ ${formattedInteger}.${decimal}`;
   };
 
+  const isStaticLocalHost = () => {
+    return (
+      typeof location !== 'undefined' &&
+      (location.protocol === 'file:' || /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || ''))
+    );
+  };
+
+  const getConfiguredApiBase = () => {
+    try {
+      const runtimeBase =
+        typeof window !== 'undefined' ? window.__API_BASE__ : '';
+      if (runtimeBase) return String(runtimeBase).replace(/\/+$/, '');
+    } catch {}
+
+    try {
+      const storageBase = localStorage.getItem('msdach-api-base');
+      if (storageBase) return String(storageBase).replace(/\/+$/, '');
+    } catch {}
+
+    return '';
+  };
+
+  const resolveApiUrl = (path) => {
+    const base = getConfiguredApiBase();
+    if (base) return `${base}${path}`;
+    if (!isStaticLocalHost()) return path;
+    return path;
+  };
+
+  const shouldTrySameOriginApi = () => {
+    return !isStaticLocalHost() || Boolean(getConfiguredApiBase());
+  };
+
+  const extractLeadList = (payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== 'object') return [];
+    return payload.data || payload.leads || payload.items || payload.results || [];
+  };
+
+  const normalizeStatus = (status) => {
+    const value = String(status || '').trim().toLowerCase();
+    if (!value) return '';
+    if (value === 'offen') return 'Offen';
+    if (value === 'in bearbeitung') return 'in Bearbeitung';
+    if (value === 'follow up') return 'follow up';
+    if (value === 'infos eingeholt' || value === 'nur info eingeholt') return 'Nur Info eingeholt';
+    if (value === 'beauftragung') return 'Beauftragung';
+    if (value === 'ea beauftragung' || value === 'ea beauftragt') return 'EA Beauftragung';
+    if (value === 'nf beauftragung' || value === 'nf beauftragt' || value === 'nt beauftragt') return 'NF Beauftragung';
+    if (value === 'falscher kunde') return 'falscher Kunde';
+    if (value === 'ghoster') return 'Ghoster';
+    if (value === 'abgesagt') return 'Abgesagt';
+    if (value === '1x gesagt tot' || value === 'abgesagt tot') return 'Abgesagt tot';
+    if (value === 'storno' || value === 'storniert') return 'Storniert';
+    if (value === 'außerhalb einzugsgebiet' || value === 'ausserhalb einzugsgebiet') return 'Außerhalb Einzugsgebiet';
+    return '';
+  };
+
+  const summarizeLeads = (leads) => {
+    const summary = {
+      totalLeads: Array.isArray(leads) ? leads.length : 0,
+      totalSummeNetto: 0,
+      statuses: {
+        'Offen': 0,
+        'in Bearbeitung': 0,
+        'Beauftragung': 0,
+        'EA Beauftragung': 0,
+        'NF Beauftragung': 0,
+        'Nur Info eingeholt': 0,
+        'follow up': 0,
+        'falscher Kunde': 0,
+        'Ghoster': 0,
+        'Abgesagt': 0,
+        'Abgesagt tot': 0,
+        'Storniert': 0,
+        'Außerhalb Einzugsgebiet': 0,
+      },
+    };
+
+    (leads || []).forEach((lead) => {
+      const rawAmount = lead?.summe_netto ?? lead?.summe ?? 0;
+      const amount = Number.parseFloat(String(rawAmount).replace(/[^\d,.-]/g, '').replace(',', '.'));
+      if (Number.isFinite(amount)) {
+        summary.totalSummeNetto += amount;
+      }
+
+      const key = normalizeStatus(lead?.status);
+      if (key && Object.prototype.hasOwnProperty.call(summary.statuses, key)) {
+        summary.statuses[key] += 1;
+      }
+    });
+
+    return summary;
+  };
+
+  const readLeadsCache = () => {
+    try {
+      const raw = localStorage.getItem(LEADS_CACHE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed?.leads) ? parsed.leads : [];
+    } catch (error) {
+      console.warn('Unable to read cached leads:', error.message);
+      return [];
+    }
+  };
+
   // Update dashboard with data from API
   const updateDashboardWithData = (data) => {
     if (data.status === 'success' && data.data) {
@@ -448,6 +557,27 @@ const dashboardPage = (function() {
     }
   };
 
+  const updateDashboardFromLeads = (leads) => {
+    const summary = summarizeLeads(leads);
+
+    const totalLeadsEl = document.getElementById('total-leads');
+    if (totalLeadsEl) {
+      totalLeadsEl.textContent = formatNumber(summary.totalLeads);
+    }
+
+    const totalSummeEl = document.getElementById('total-summe');
+    if (totalSummeEl) {
+      totalSummeEl.textContent = formatCurrency(summary.totalSummeNetto);
+    }
+
+    Object.entries(summary.statuses).forEach(([key, value]) => {
+      const element = document.getElementById(key);
+      if (element) {
+        element.textContent = formatNumber(value);
+      }
+    });
+  };
+
   // Show error message on dashboard
   const showErrorMessage = () => {
     document.querySelectorAll('.card-value').forEach(el => {
@@ -468,7 +598,7 @@ const dashboardPage = (function() {
         font-size: 14px;
       `;
       errorDiv.innerHTML = `
-        <strong>⚠️ API Error:</strong> Could not fetch data from https://goarrow.ai/test/dashboard.php<br>
+        <strong>⚠️ API Error:</strong> Could not fetch lead totals from /api/leads<br>
         Please check the API endpoint or contact support.
       `;
       container.appendChild(errorDiv);
@@ -482,70 +612,48 @@ const dashboardPage = (function() {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    if (!data || data.status !== 'success') throw new Error('Invalid response format');
-    return data;
+    const leads = extractLeadList(data);
+    if (!leads.length && !Array.isArray(data)) throw new Error('Invalid leads response format');
+    return leads.length ? leads : data;
+  };
+
+  const fetchLeadsForDashboard = async () => {
+    const SAME_ORIGIN_API = resolveApiUrl('/api/dashboard');
+    const cacheBust = `_ts=${Date.now()}`;
+
+    if (shouldTrySameOriginApi()) {
+      try {
+        const response = await fetch(`${SAME_ORIGIN_API}?${cacheBust}`, {
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        updateDashboardWithData(data);
+        return;
+      } catch (error) {
+        console.warn('Same-origin dashboard fetch failed:', error.message);
+      }
+    }
+
+    // No external fallbacks - dashboard relies on local API
+    showErrorMessage();
   };
 
   // Main fetch function — tries same-origin API, then multiple CORS proxies in order
 const fetchDashboardData = async () => {
-    const API_URL = 'https://goarrow.ai/test/dashboard.php';
-    const SAME_ORIGIN_API = '/api/dashboard';
-
-    // 0) Try same-origin Vercel Function first (works on deployed site)
     try {
-      console.log(`🔄 Trying same-origin API: ${SAME_ORIGIN_API}`);
-      const res = await fetch(SAME_ORIGIN_API, { headers: { 'Accept': 'application/json' } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const sameData = await res.json();
-      if (!sameData || sameData.status !== 'success') throw new Error('Invalid response format');
-      updateDashboardWithData(sameData);
-      return;
-    } catch (e) {
-      console.warn('⚠️ Same-origin API failed, falling back to proxies...', e.message);
-    }
-
- const proxies = [
-    `https://corsproxy.io/?${encodeURIComponent(API_URL)}`,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(API_URL)}`,
-    `https://cors-anywhere.herokuapp.com/${API_URL}`,
-  ];
-  
-
-    console.log('🚀 Fetching data from API:', API_URL);
-
-    for (const proxyUrl of proxies) {
-      try {
-        console.log(`🔄 Trying proxy: ${proxyUrl}`);
-        const data = await fetchWithProxy(proxyUrl);
-        console.log('✅ Proxy successful:', proxyUrl);
-        updateDashboardWithData(data);
-        return;
-      } catch (err) {
-        console.warn(`⚠️ Proxy failed (${proxyUrl}):`, err.message);
-      }
-    }
-
-    // Final attempt: direct API call (will work if the API enables CORS)
-    try {
-      console.log(`🔄 Trying direct request: ${API_URL}`);
-      const directRes = await fetch(API_URL, { headers: { 'Accept': 'application/json' }, mode: 'cors' });
-      if (!directRes.ok) throw new Error(`HTTP ${directRes.status}`);
-      const directData = await directRes.json();
-      if (!directData || directData.status !== 'success') throw new Error('Invalid response format');
-      updateDashboardWithData(directData);
-      return;
+      await fetchLeadsForDashboard();
     } catch (err) {
-      console.warn(`⚠️ Direct fetch failed:`, err.message);
+      console.warn('Dashboard leads fetch failed:', err.message);
+      const cachedLeads = readLeadsCache();
+      if (cachedLeads.length) {
+        console.log(`Using cached leads for dashboard: ${cachedLeads.length}`);
+        updateDashboardFromLeads(cachedLeads);
+        return;
+      }
+      showErrorMessage();
     }
-
-    // All attempts failed
-    console.error('❌ All CORS proxies failed. No data loaded.');
-    console.log('💡 Permanent fix: Add these headers to dashboard.php on the server:');
-    console.log('   header("Access-Control-Allow-Origin: *");');
-    console.log('   header("Access-Control-Allow-Methods: GET, OPTIONS");');
-    console.log('   header("Access-Control-Allow-Headers: Content-Type");');
-    console.log('   header("Content-Type: application/json");');
-    showErrorMessage();
   };
 
   function init(contentEl, titleElement) {
@@ -581,3 +689,5 @@ const fetchDashboardData = async () => {
 // Register to window object
 window.dashboardPage = dashboardPage;
 console.log('📁 dashboard.js loaded - window.dashboardPage exists:', !!window.dashboardPage);
+
+

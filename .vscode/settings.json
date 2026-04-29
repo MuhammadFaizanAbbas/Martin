@@ -1,6 +1,7 @@
 {
-    "liveServer.settings.port": 5502,
+    "liveServer.settings.port": 5503,
     "cSpell.words": [
+        "apikey",
         "Bearbeiter",
         "Beauftragung",
         "Delegieren",

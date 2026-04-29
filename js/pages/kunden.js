@@ -8,30 +8,24 @@ const kundenPage = (function () {
   const KUNDEN_LEADS_CACHE_KEY = "kunden-leads-cache-v1";
   const KUNDEN_DASHBOARD_CACHE_KEY = "kunden-dashboard-cache-v1";
   const USER_DELEGATION_RULES_KEY = "msdach-user-delegations-v1";
+  
 
   // ── API URLs ──────────────────────────────────────────────────────────────
   const SO_LEADS = "/api/all_leads";
   const SO_DASHBOARD = "/api/dashboard";
-  const REMOTE_LEADS_URL = "https://goarrow.ai/test/fetch_all_leads.php";
-  const REMOTE_DASHBOARD_URL = "https://goarrow.ai/test/dashboard.php";
   const ACTIVITY_FETCH_SAME = "/api/lead_activity";
   const NOTES_FETCH_SAME = "/api/lead_notes";
-  const UPDATE_API_DIRECT = "https://goarrow.ai/test/update_lead.php";
   const UPDATE_API_SAME = "/api/update_lead";
-  const UPDATE_API_PROXY = `https://corsproxy.io/?${encodeURIComponent(UPDATE_API_DIRECT)}`;
-  const UPDATE_API_ALT_PROXY = `https://api.allorigins.win/raw?url=${encodeURIComponent(UPDATE_API_DIRECT)}`;
   const BULK_EMAIL_WEBHOOK_URL =
     "https://msdach.app.n8n.cloud/webhook/send_bulk_emails";
   const KUNDEN_AUTO_REFRESH_MS = 5 * 60 * 1000;
 
   // Add these lines near other API URLs (around line 20-30)
-const INSERT_ACTIVITY_API = "/api/insert_activity";
-const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
+// const INSERT_ACTIVITY_API = "/api/insert_activity";
+// const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
 
-  const PROXY_LEADS_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_LEADS_URL)}`;
-  const PROXY_DASHBOARD_URL = `https://corsproxy.io/?${encodeURIComponent(REMOTE_DASHBOARD_URL)}`;
-  const ALT_PROXY_LEADS_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(REMOTE_LEADS_URL)}`;
-  const ALT_PROXY_DASHBOARD_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(REMOTE_DASHBOARD_URL)}`;
+const ACTIVITY_LOG_API = "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/Aktivitätsprotokoll";
+// const SUPABASE_ANON_KEY = "your-supabase-anon-key"; // You'll need to add your Supabase anon key here
 
   // ── State ──────────────────────────────────────────────────────────────────
   function shouldTrySameOriginApi() {
@@ -44,9 +38,84 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
     return !isStaticDevHost;
   }
 
+  const LOCAL_DEV_API_ORIGIN = "http://127.0.0.1:3000";
+
+  function getLocalDevApiBaseUrl() {
+    if (typeof window === "undefined") return "";
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+    const isStaticDevHost =
+      (hostname === "127.0.0.1" || hostname === "localhost") &&
+      /^55\d{2}$/.test(port || "");
+
+    if (protocol === "file:") return LOCAL_DEV_API_ORIGIN;
+    if (isStaticDevHost) return LOCAL_DEV_API_ORIGIN;
+    return "";
+  }
+
+  function normalizeApiBaseCandidate(value) {
+    const normalized = String(value || "").trim().replace(/\/+$|\s+/g, "");
+    if (!normalized) return "";
+
+    try {
+      const parsed = new URL(normalized);
+      const isLocalCandidate = /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname || "");
+      const isStaticLocalPage =
+        typeof location !== "undefined" &&
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || "") &&
+        location.port !== "3000";
+
+      if (isStaticLocalPage && isLocalCandidate && parsed.port !== "3000") {
+        return LOCAL_DEV_API_ORIGIN;
+      }
+    } catch {
+      return "";
+    }
+
+    return normalized;
+  }
+
+  function getConfiguredApiBase() {
+    try {
+      const runtimeBase =
+        typeof window !== "undefined" ? window.__API_BASE__ : "";
+      const normalizedRuntimeBase = normalizeApiBaseCandidate(runtimeBase);
+      if (normalizedRuntimeBase) return normalizedRuntimeBase;
+    } catch {}
+
+    try {
+      const storageBase = localStorage.getItem("msdach-api-base");
+      const normalizedStorageBase = normalizeApiBaseCandidate(storageBase);
+      if (normalizedStorageBase) return normalizedStorageBase;
+    } catch {}
+
+    try {
+      if (
+        typeof location !== "undefined" &&
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || "") &&
+        location.port !== "3000"
+      ) {
+        return LOCAL_DEV_API_ORIGIN;
+      }
+    } catch {}
+
+    return "";
+  }
+
+  function resolveApiUrl(apiPath) {
+    if (!apiPath) return apiPath;
+    if (/^https?:\/\//i.test(apiPath)) return apiPath;
+    const base = getConfiguredApiBase();
+    if (!base) return apiPath;
+    return `${base}${apiPath.startsWith("/") ? apiPath : `/${apiPath}`}`;
+  }
+
   function getCorsSafeEndpoints(sameOriginUrl, proxyUrl, altProxyUrl) {
     const endpoints = [];
-    if (shouldTrySameOriginApi() && sameOriginUrl) {
+    const resolvedUrl = resolveApiUrl(sameOriginUrl);
+    if (resolvedUrl) endpoints.push({ url: resolvedUrl, delay: 0 });
+    if (shouldTrySameOriginApi() && sameOriginUrl && resolvedUrl !== sameOriginUrl) {
       endpoints.push({ url: sameOriginUrl, delay: 0 });
     }
     if (proxyUrl) endpoints.push({ url: proxyUrl, delay: 0 });
@@ -54,21 +123,15 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
     return endpoints;
   }
 
-  function getResilientFetchEndpoints(sameOriginUrl, targetUrl) {
+  function getResilientFetchEndpoints(sameOriginUrl) {
     const endpoints = [];
-    if (shouldTrySameOriginApi() && sameOriginUrl) {
+    const resolvedUrl = resolveApiUrl(sameOriginUrl);
+    if (resolvedUrl) {
+      endpoints.push({ url: `${resolvedUrl}${resolvedUrl.includes("?") ? "&" : "?"}_ts=${Date.now()}`, delay: 0 });
+    }
+    if (shouldTrySameOriginApi() && sameOriginUrl && resolvedUrl !== sameOriginUrl) {
       endpoints.push({ url: `${sameOriginUrl}?_ts=${Date.now()}`, delay: 0 });
     }
-
-    const proxyTargets = [
-      `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-    ];
-
-    proxyTargets.forEach((url, index) => {
-      endpoints.push({ url, delay: index * 350 });
-    });
-
     return endpoints;
   }
 
@@ -357,10 +420,13 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
   }
 
   function isStaticLocalHost() {
+    if (typeof location === "undefined") return false;
+    if (location.protocol === "file:") return true;
+    const hostname = location.hostname || "";
+    const port = location.port || "";
     return (
-      typeof location !== "undefined" &&
-      (location.protocol === "file:" ||
-        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || ""))
+      /^(localhost|127\.0\.0\.1)$/i.test(hostname) &&
+      /^55\d{2}$/.test(port)
     );
   }
 
@@ -497,9 +563,8 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
     console.log("Update payload form data:", formData.toString());
 
     try {
-      if (isStaticLocalHost()) throw new Error("Static localhost without /api");
-
-      const response = await fetch(UPDATE_API_SAME, {
+      const updateUrl = resolveApiUrl(UPDATE_API_SAME);
+      const response = await fetch(updateUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -525,45 +590,8 @@ const INSERT_ACTIVITY_DIRECT = "https://goarrow.ai/test/insert_activity.php";
       console.log("Update response (same-origin):", normalized);
       return normalized;
     } catch (error) {
-      console.warn("Same-origin update failed, trying proxy:", error.message);
+      throw new Error(`Update failed via ${UPDATE_API_SAME}: ${error.message}`);
     }
-
-    const proxyEndpoints = [UPDATE_API_PROXY, UPDATE_API_ALT_PROXY];
-    for (const endpoint of proxyEndpoints) {
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: formData.toString(),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`HTTP ${response.status}: ${errorText}`);
-        }
-
-        const text = await response.text();
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = { status: "success", raw: text };
-        }
-
-        const normalized = normalizeUpdateResponse(data, text);
-        console.log("Update response (proxy):", normalized);
-        return normalized;
-      } catch (error) {
-        console.warn("Update proxy failed:", endpoint, error.message);
-      }
-    }
-
-    throw new Error(
-      friendlyApiError("Update fehlgeschlagen", "Kein erreichbarer Update-Endpunkt verfügbar"),
-    );
   }
 
   // ─────────────────────────────────────────────
@@ -766,7 +794,7 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
   const normalizedText = rewriteActivityTextActor(activityText, actor);
 
   const payload = {
-    lead_id: leadId,
+    lead_id: String(leadId),
     from: actor,
     description: normalizedText,
     activity_type: activityType,
@@ -782,14 +810,16 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
 
   console.log("Activity insert payload:", payload);
 
-  const params = new URLSearchParams();
-  Object.entries(payload).forEach(([k, v]) => {
-    if (v !== undefined && v !== null) params.append(k, String(v));
-  });
-
   try {
-    if (isStaticLocalHost()) throw new Error("Static localhost without /api");
-    const res = await fetch(INSERT_ACTIVITY_API, {
+    const activityUrl = resolveApiUrl("/api/insert_activity");
+    if (!activityUrl) {
+      throw new Error("Static localhost without /api");
+    }
+    console.log("[kunden activity][POST] same-origin request", {
+      url: activityUrl,
+      body: payload,
+    });
+    const res = await fetch(activityUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -799,38 +829,11 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (data && (data.status === "success" || data.success === true)) {
-      return data;
-    }
-    return data;
+    console.log("[kunden activity][POST] same-origin response", data);
+    return { success: true };
   } catch (err) {
-    if (isStaticLocalHost()) {
-      console.info("Skipping same-origin activity insert on static localhost; using proxy");
-    } else {
-      console.warn("Activity insert via same-origin failed, trying proxy...", err.message);
-    }
-
-    try {
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(INSERT_ACTIVITY_DIRECT)}`;
-      const res = await fetch(proxyUrl, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: params,
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      try {
-        return JSON.parse(text);
-      } catch {
-        return { status: "success", raw: text };
-      }
-    } catch (proxyErr) {
-      console.error("Activity insert failed:", proxyErr);
-      throw new Error(`Aktivit??t konnte nicht gespeichert werden: ${proxyErr.message}`);
-    }
+    console.error("Activity insert failed:", err);
+    throw new Error(`Aktivität konnte nicht gespeichert werden: ${err.message}`);
   }
 }
 
@@ -844,7 +847,6 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
   // ─────────────────────────────────────────────
   // NOTES API (from leads page)
   // ─────────────────────────────────────────────
-  const INSERT_NOTE_DIRECT = "https://goarrow.ai/test/insert_lead_note.php";
   const NOTES_INSERT_SAME = "/api/insert_lead_note";
 
   async function createNoteForLead(leadId, text) {
@@ -858,19 +860,16 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
       user: actor,
       from: actor,
     };
-    const params = new URLSearchParams();
-    Object.entries(body).forEach(([k, v]) => {
-      if (v !== undefined && v !== null) params.append(k, String(v));
-    });
     try {
-      if (!shouldTrySameOriginApi()) {
+      const noteUrl = resolveApiUrl(NOTES_INSERT_SAME);
+      if (!noteUrl) {
         throw new Error("Static localhost without /api");
       }
       console.log("[kunden notes][POST] same-origin request", {
-        url: NOTES_INSERT_SAME,
+        url: noteUrl,
         body,
       });
-      const res = await fetch(NOTES_INSERT_SAME, {
+      const res = await fetch(noteUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -883,42 +882,7 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
       console.log("[kunden notes][POST] same-origin response", data);
       return data;
     } catch (err) {
-      console.warn("[kunden notes][POST] same-origin failed", err.message);
-      const proxyUrls = [
-        `https://corsproxy.io/?${encodeURIComponent(INSERT_NOTE_DIRECT)}`,
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(INSERT_NOTE_DIRECT)}`,
-      ];
-      try {
-        for (const proxyUrl of proxyUrls) {
-          try {
-            console.log("[kunden notes][POST] proxy request", {
-              url: proxyUrl,
-              body: params.toString(),
-            });
-            const res = await fetch(proxyUrl, {
-              method: "POST",
-              headers: {
-                Accept: "application/json",
-                "Content-Type": "application/x-www-form-urlencoded",
-              },
-              body: params,
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const textResp = await res.text();
-            console.log("[kunden notes][POST] proxy raw response", textResp);
-            try {
-              return JSON.parse(textResp);
-            } catch {
-              return { status: "success", raw: textResp };
-            }
-          } catch (proxyErr) {
-            console.warn("[kunden notes][POST] proxy failed", proxyUrl, proxyErr.message);
-          }
-        }
-        throw new Error("All note POST endpoints failed");
-      } catch (proxyErr) {
-        throw new Error(`Notiz konnte nicht gespeichert werden: ${proxyErr.message}`);
-      }
+      throw new Error(`Notiz konnte nicht gespeichert werden: ${err.message}`);
     }
   }
 
@@ -933,7 +897,19 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
       signal: controller?.signal,
     }).then(async (res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+      const text = await res.text();
+      if (!contentType.includes("application/json")) {
+        throw new Error(
+          `Expected JSON response but got ${contentType || "unknown"}: ${text.slice(0, 120)}`,
+        );
+      }
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        throw new Error(`Invalid JSON response: ${text.slice(0, 120)}`);
+      }
       return { success: true, data };
     });
   }
@@ -1016,9 +992,9 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
       }));
     };
 
-    if (shouldTrySameOriginApi()) {
+    if (resolveApiUrl(NOTES_FETCH_SAME)) {
       try {
-        const sameOriginUrl = `${NOTES_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`;
+        const sameOriginUrl = `${resolveApiUrl(NOTES_FETCH_SAME)}?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`;
         console.log("[kunden notes][GET] same-origin request", sameOriginUrl);
         const res = await fetch(sameOriginUrl, {
           headers: { Accept: "application/json" },
@@ -1036,97 +1012,60 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
       }
     }
 
-    const target = `https://goarrow.ai/test/fetch_lead_notes.php?lead_id=${encodeURIComponent(leadId)}&${cacheBust}`;
-    console.log("[kunden notes][GET] direct target", target);
-    const proxyUrls = [
-      ...getRemoteJsonProxyUrls(target),
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
-    ];
-    for (const url of proxyUrls) {
-      try {
-        console.log("[kunden notes][GET] proxy request", url);
-        const r = await fetch(url, {
-          headers: { Accept: "application/json" },
-          cache: "no-store",
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        console.log("[kunden notes][GET] proxy response", data);
-        const normalized = normalizeNotes(data).map((n) => ({
-          ...n,
-          author: n.author || "System",
-        }));
-        notesCache.set(String(leadId), normalized);
-        syncLeadNotes(normalized);
-        return normalized;
-      } catch (err) {
-        console.warn("[kunden notes][GET] proxy failed", url, err.message);
-      }
-    }
-    console.warn("[kunden notes][GET] no notes response received", { leadId });
-    return [];
+    throw new Error("Notizen konnten nicht geladen werden");
   }
 
 async function fetchActivityForLead(leadId) {
-    if (activityCache.has(String(leadId))) {
-      return activityCache.get(String(leadId));
+  const cacheKey = String(leadId);
+  if (activityCache.has(cacheKey)) {
+    return activityCache.get(cacheKey);
+  }
+  
+  const normalize = (a) => {
+    let text = a.text || a.activity || a.action || a.event || a.message || a.desc || a.description || '';
+    let by = a.from || a.by || a.user || a.username || a.author || a.created_by || '';
+    if (isInvalidActivityActor(by)) {
+      by = resolveActivityActorForLead(leadId, by);
     }
-    
-    const normalize = (a) => {
-      let text = a.text || a.activity || a.action || a.event || a.message || a.desc || a.description || '';
-      let by = a.from || a.by || a.user || a.username || a.author || a.created_by || '';
-      if (isInvalidActivityActor(by)) {
-        by = resolveActivityActorForLead(leadId, by);
-      }
-      text = rewriteActivityTextActor(text, by);
-      let at = a.at || a.datetime || a.timestamp || a.date_time || a.date || a.created_at || '';
-      if (!at) {
-        const d = a.activity_date || a.activityDate || a.date;
-        const t = a.activity_time || a.activityTime || a.time;
-        if (d || t) at = `${d || ''}${d && t ? ' ' : ''}${t || ''}`.trim();
-      }
-      return {
-        text: String(text || ''),
-        by: String(by || 'Bearbeiter unbekannt'),
-        at: String(at || ''),
-      };
+    text = rewriteActivityTextActor(text, by);
+    let at = a.at || a.datetime || a.timestamp || a.date_time || a.date || a.created_at || '';
+    if (!at) {
+      const d = a.activity_date || a.activityDate || a.date;
+      const t = a.activity_time || a.activityTime || a.time;
+      if (d || t) at = `${d || ''}${d && t ? ' ' : ''}${t || ''}`.trim();
+    }
+    return {
+      text: String(text || ''),
+      by: String(by || 'Bearbeiter unbekannt'),
+      at: String(at || ''),
     };
+  };
 
-    async function tryFetch(url) {
-      const r = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = await r.json();
-      const list = Array.isArray(data) ? data : (data.data || data.activity || data.items || []);
-      return (list || []).map(normalize);
-    }
-
-    if (shouldTrySameOriginApi()) {
-      try {
-        let list = await tryFetch(`${ACTIVITY_FETCH_SAME}?lead_id=${encodeURIComponent(leadId)}`);
-        if (!list.length) {
-          list = await tryFetch(`${ACTIVITY_FETCH_SAME}?id=${encodeURIComponent(leadId)}`);
+  // First try the old API (which works with your existing PHP backend)
+  if (resolveApiUrl(ACTIVITY_FETCH_SAME)) {
+    try {
+      const oldUrl = `${resolveApiUrl(ACTIVITY_FETCH_SAME)}?lead_id=${encodeURIComponent(leadId)}`;
+      const r = await fetch(oldUrl, { 
+        headers: { Accept: 'application/json' }, 
+        cache: 'no-store' 
+      });
+      if (r.ok) {
+        const data = await r.json();
+        const list = Array.isArray(data) ? data : (data.data || data.activity || data.items || []);
+        const normalized = (list || []).map(normalize);
+        if (normalized.length) {
+          activityCache.set(cacheKey, normalized);
+          return normalized;
         }
-        if (list.length) {
-          activityCache.set(String(leadId), list);
-          return list;
-        }
-      } catch {}
-    }
-
-    const base = 'https://goarrow.ai/test/fetch_activity.php';
-    const targets = [`${base}?lead_id=${encodeURIComponent(leadId)}`];
-    for (const target of targets) {
-      for (const url of getRemoteJsonProxyUrls(target)) {
-        try {
-          const list = await tryFetch(url);
-          if (list.length) {
-            activityCache.set(String(leadId), list);
-            return list;
-          }
-        } catch {}
       }
+    } catch (oldErr) {
+      console.warn("Old activity API failed:", oldErr.message);
     }
-    return [];
+  }
+
+  // Don't try Supabase directly - it requires API key
+  // Instead, use your existing API endpoint which has the key on the server side
+  return [];
 }
 
   function splitActivityTimestamp(activityAt) {
@@ -1305,7 +1244,7 @@ async function fetchActivityForLead(leadId) {
 
   async function fetchLeads() {
     const result = await fetchFirstAvailable(
-      getResilientFetchEndpoints(SO_LEADS, REMOTE_LEADS_URL)
+      getResilientFetchEndpoints(SO_LEADS)
     );
     if (!result.success || !result.data) {
       const cached = loadJsonCache(KUNDEN_LEADS_CACHE_KEY);
@@ -1400,7 +1339,7 @@ async function fetchActivityForLead(leadId) {
 
   async function fetchDashboardStats() {
     const result = await fetchFirstAvailable(
-      getResilientFetchEndpoints(SO_DASHBOARD, REMOTE_DASHBOARD_URL)
+      getResilientFetchEndpoints(SO_DASHBOARD)
     );
 
     if (!result.success || !result.data) {
@@ -1729,11 +1668,22 @@ function protectFilterDropdowns() {
   }
 
   function statusMatches(status, expectedStatus) {
-    return getCanonicalStatus(status) === getCanonicalStatus(expectedStatus);
+    const actual = getCanonicalStatus(status);
+    const expected = getCanonicalStatus(expectedStatus);
+    if (expected === "Offen") {
+      return actual === "Offen" || actual === "TNE Offen";
+    }
+    return actual === expected;
   }
 
   function getStatusCount(status) {
     const target = getCanonicalStatus(status);
+    if (target === "Offen") {
+      return leadsData.filter((lead) => {
+        const actual = getCanonicalStatus(lead.status);
+        return actual === "Offen" || actual === "TNE Offen";
+      }).length;
+    }
     return leadsData.filter((lead) => getCanonicalStatus(lead.status) === target).length;
   }
 
@@ -1832,7 +1782,7 @@ function protectFilterDropdowns() {
     const canonicalStatus = getCanonicalStatus(status);
     if (canonicalStatus === "follow up") return "follow up";
     if (canonicalStatus === "in Bearbeitung") return "in Bearbeitung";
-    if (canonicalStatus === "Offen") return "Offen";
+    if (canonicalStatus === "Offen" || canonicalStatus === "TNE Offen") return "Offen";
     if (canonicalStatus === "Nur Info eingeholt") return "Nur Info eingeholt";
     if (canonicalStatus === "falscher Kunde") return "falscher Kunde";
     return canonicalStatus;
@@ -2496,7 +2446,7 @@ function openEditStatusModal(leadId) {
     if (kundenActiveFilter === "auftrags") {
       const targetStatus = getAuftragsbestaetigungTargetStatus(lead.status);
       return {
-        title: "AuftragsbestÃ¤tigung",
+        title: "Auftragsbestätigung",
         placeholder: "WÃ¤hlen Sie eine Option...",
         options: targetStatus ? [targetStatus, "Storniert"] : AUFTRAGSBESTAETIGUNG_STATUS_OPTIONS,
       };
@@ -2577,6 +2527,27 @@ function openEditStatusModal(leadId) {
       closeModal();
       return;
     }
+    // Show confirmation for EA Beauftragung
+  const confirmed = await new Promise((resolve) => {
+    const handleConfirmation = async () => {
+      const proceed = showBeauftragungConfirmation(lead.id, newStatus, previousStatus, async () => {
+        resolve(true);
+      });
+      if (proceed === true) {
+        resolve(true);
+      } else if (proceed === false) {
+        // Waiting for confirmation modal
+        return;
+      }
+    };
+    handleConfirmation();
+    
+    // If no confirmation needed, resolve immediately
+    if (newStatus !== "EA Beauftragung" && newStatus !== "EA beauftragt") {
+      resolve(true);
+    }
+  });
+    if (!confirmed) return;
 
     saveBtn.disabled = true;
     saveBtn.textContent = "Wird gespeichert...";
@@ -2612,6 +2583,133 @@ function openEditStatusModal(leadId) {
   });
   
   modal.classList.add('active');
+}
+
+// ========== End of Edit Status Modal ==========
+function showBeauftragungConfirmation(leadId, newStatus, previousStatus, saveCallback) {
+  const lead = leadsData.find((l) => String(l.id) === String(leadId));
+  if (!lead) return false;
+  
+  // Only show for EA Beauftragung
+  if (newStatus !== "EA Beauftragung" && newStatus !== "EA beauftragt") {
+    return true; // Proceed without confirmation
+  }
+  
+  const currentSumme = lead.summe ? lead.summe.replace('$ ', '') : "0,00";
+  
+  const modalHtml = `
+    <div id="beauftragungConfirmModal" class="k-modal-overlay">
+      <div class="k-modal-content" style="max-width: 500px;">
+        <div class="k-modal-header">
+          <h3>📋 EA Beauftragung Bestätigung</h3>
+          <button class="k-close-btn" id="closeConfirmModal">&times;</button>
+        </div>
+        <div class="k-modal-body">
+          <div class="form-group" style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #0f172a;">Summe Netto</label>
+            <div style="background: #f1f5f9; padding: 12px 16px; border-radius: 10px; font-size: 1.2rem; font-weight: 700; color: #166534;">
+              $ ${escapeHtml(currentSumme)}
+            </div>
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 12px; font-weight: 600; color: #0f172a;">Rabatt Optionen</label>
+            
+            <div style="display: flex; gap: 20px; margin-bottom: 16px;">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="discountCheckbox1" style="width: 18px; height: 18px; cursor: pointer;">
+                <span>Full</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="discountCheckbox2" style="width: 18px; height: 18px; cursor: pointer;">
+                <span>Discount</span>
+              </label>
+            </div>
+            
+          
+          
+          <div style="margin: 16px 0; padding: 12px; background: #fef3c7; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <div style="font-size: 0.85rem; color: #92400e;">
+              ⚡ Nach Bestätigung wird der Status zu "EA Beauftragung" aktualisiert.
+            </div>
+          </div>
+          
+          <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+            <button type="button" id="cancelConfirm" class="k-btn-outline" style="padding: 10px 24px;">Abbrechen</button>
+            <button type="button" id="confirmBeauftragung" class="k-btn-green" style="padding: 10px 24px;">✅ EA Beauftragung Bestätigen</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  const existingModal = document.getElementById("beauftragungConfirmModal");
+  if (existingModal) existingModal.remove();
+  
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  
+  const modal = document.getElementById("beauftragungConfirmModal");
+  const closeBtn = document.getElementById("closeConfirmModal");
+  const cancelBtn = document.getElementById("cancelConfirm");
+  const confirmBtn = document.getElementById("confirmBeauftragung");
+  
+  const closeModal = () => {
+    modal.classList.remove('active');
+    setTimeout(() => modal.remove(), 300);
+  };
+  
+  closeBtn?.addEventListener('click', closeModal);
+  cancelBtn?.addEventListener('click', closeModal);
+  modal?.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  
+  confirmBtn?.addEventListener('click', async () => {
+    const discount5 = document.getElementById("discountCheckbox1")?.checked || false;
+    const discount10 = document.getElementById("discountCheckbox2")?.checked || false;
+    const discount15 = document.getElementById("discountCheckbox3")?.checked || false;
+    const discount20 = document.getElementById("discountCheckbox4")?.checked || false;
+    
+    let discountPercent = 0;
+    if (discount5) discountPercent = 5;
+    if (discount10) discountPercent = 10;
+    if (discount15) discountPercent = 15;
+    if (discount20) discountPercent = 20;
+    
+    const discountMessage = discountPercent > 0 ? ` mit ${discountPercent}% Rabatt` : " ohne Rabatt";
+    
+    closeModal();
+    
+    // Log the confirmation
+    const actor = resolveActivityActorForLead(leadId, lead.bearbeiter);
+    const activityText = `${actor} hat EA Beauftragung bestätigt${discountMessage} (Summe: $ ${currentSumme})`;
+    
+    addOptimisticActivity(leadId, {
+      text: activityText,
+      by: actor,
+      at: new Date().toLocaleString(),
+    });
+    
+    try {
+      await insertActivity(leadId, "status_change", activityText, {
+        from: actor,
+        bearbeiter: actor,
+        leadName: lead.name,
+        summe: currentSumme,
+        discount: discountPercent
+      });
+    } catch (e) {
+      console.warn("Activity log failed:", e);
+    }
+    
+    // Call the original save callback
+    if (saveCallback) {
+      await saveCallback();
+    }
+  });
+  
+  modal.classList.add('active');
+  return false; // Don't proceed automatically, wait for confirmation
 }
 
   // ========== Full Edit Popup with API Integration ==========
@@ -2821,7 +2919,7 @@ function openEditStatusModal(leadId) {
         
         const editId = String(lead.id).trim();
         const previousStatus = lead.status;
-        if (!editId || editId === "null" || editId === "undefined") {
+        if (!editId || editId === "-" || editId === "undefined") {
           throw new Error("Lead ID fehlt");
         }
         
@@ -2940,125 +3038,138 @@ const payload = {
     modal.classList.add('active');
   }
 
-  window.viewKunde = async (id) => {
-    const lead = leadsData.find((l) => l.id === id);
-    if (!lead) return;
-    currentViewLeadId = id;
-    
-    const titleEl = document.getElementById("kundenViewTitle");
-    const contentEl = document.getElementById("kundenViewContent");
-    if (titleEl) titleEl.textContent = (lead.salutation ? lead.salutation + " " : "") + lead.name + " – Details";
-    if (contentEl) {
-      contentEl.innerHTML = `<div style="text-align: center; padding: 20px;">⏳ Lade Details...</div>`;
+ window.viewKunde = async (id) => {
+  const lead = leadsData.find((l) => l.id === id);
+  if (!lead) return;
+  currentViewLeadId = id;
+  
+  const titleEl = document.getElementById("kundenViewTitle");
+  const contentEl = document.getElementById("kundenViewContent");
+  if (titleEl) titleEl.textContent = (lead.salutation ? lead.salutation + " " : "") + lead.name + " – Details";
+  if (contentEl) {
+    contentEl.innerHTML = `<div style="text-align: center; padding: 20px;">⏳ Lade Details...</div>`;
+  }
+  
+  const modal = document.getElementById("kundenViewModal");
+  if (modal) modal.classList.add("active");
+  
+  // Fetch notes and activities with error handling
+  let notes = [];
+  let activities = [];
+  
+  try {
+    notes = await fetchNotesForLead(lead.id);
+  } catch (err) {
+    console.warn("Failed to fetch notes:", err);
+    notes = [];
+  }
+  
+  try {
+    activities = await fetchActivityForLead(lead.id);
+  } catch (err) {
+    console.warn("Failed to fetch activities:", err);
+    activities = [];
+  }
+  
+  if (contentEl) {
+    let notesHtml = '';
+    if (notes && notes.length > 0) {
+      notesHtml = notes.map(note => `
+        <div class="timeline-item">
+          <div class="timeline-icon">📝</div>
+          <div class="timeline-content">
+            <div class="timeline-text">${escapeHtml(note.text)}</div>
+            <div class="timeline-meta">
+              <span class="timeline-author">${escapeHtml(note.author || note.created_by || 'Unbekannt')}</span>
+              <span class="timeline-date">${escapeHtml(note.date || 'Kein Datum')}</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      notesHtml = `<div class="empty-notes">Keine Notizen vorhanden</div>`;
     }
     
-    const modal = document.getElementById("kundenViewModal");
-    if (modal) modal.classList.add("active");
-    
-    const [notes, activities] = await Promise.all([
-      fetchNotesForLead(lead.id),
-      fetchActivityForLead(lead.id)
-    ]);
-    
-    if (contentEl) {
-      let notesHtml = '';
-      if (notes && notes.length > 0) {
-        notesHtml = notes.map(note => `
-          <div class="timeline-item">
-            <div class="timeline-icon">📝</div>
-            <div class="timeline-content">
-              <div class="timeline-text">${escapeHtml(note.text)}</div>
-              <div class="timeline-meta">
-                <span class="timeline-author">${escapeHtml(note.author)}</span>
-                <span class="timeline-date">${escapeHtml(note.date || 'Kein Datum')}</span>
-              </div>
-            </div>
+    let activitiesHtml = '';
+    if (activities && activities.length > 0) {
+      activitiesHtml = activities.map(activity => {
+        const activityStamp = splitActivityTimestamp(activity.at);
+        return `
+        <div class="activity-card">
+          <div class="activity-row">
+            <div class="activity-label">From</div>
+            <div class="activity-value">${escapeHtml(activity.by || 'Bearbeiter unbekannt')}</div>
           </div>
-        `).join('');
-      } else {
-        notesHtml = `<div class="empty-notes">Keine Notizen vorhanden</div>`;
-      }
-      
-      let activitiesHtml = '';
-      if (activities && activities.length > 0) {
-        activitiesHtml = activities.map(activity => {
-          const activityStamp = splitActivityTimestamp(activity.at);
-          return `
-          <div class="activity-card">
-            <div class="activity-row">
-              <div class="activity-label">From</div>
-              <div class="activity-value">${escapeHtml(activity.by || 'Bearbeiter unbekannt')}</div>
-            </div>
-            <div class="activity-row">
-              <div class="activity-label">Description</div>
-              <div class="activity-value activity-description">${escapeHtml(formatActivityDescription(activity))}</div>
-            </div>
-            <div class="activity-row">
-              <div class="activity-label">Activity Date</div>
-              <div class="activity-value">${escapeHtml(activityStamp.date)}</div>
-            </div>
-            <div class="activity-row">
-              <div class="activity-label">Activity Time</div>
-              <div class="activity-value">${escapeHtml(activityStamp.time)}</div>
-            </div>
+          <div class="activity-row">
+            <div class="activity-label">Description</div>
+            <div class="activity-value activity-description">${escapeHtml(formatActivityDescription(activity))}</div>
           </div>
-        `;
-        }).join('');
-      } else {
-        activitiesHtml = `<div class="empty-activities">Keine Aktivitäten vorhanden</div>`;
-      }
-      
-      contentEl.innerHTML = `
-        <div class="k-view-section">
-          <h4>Kontaktinformationen</h4>
-          <div class="k-detail-row"><div class="k-detail-label">Anrede</div><div class="k-detail-value">${escapeHtml(lead.salutation || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Name</div><div class="k-detail-value">${escapeHtml(lead.name)}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Ort</div><div class="k-detail-value">${escapeHtml(lead.ort)}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Straße</div><div class="k-detail-value">${escapeHtml(lead.strasse || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">PLZ</div><div class="k-detail-value">${escapeHtml(lead.plz || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Telefon</div><div class="k-detail-value">${escapeHtml(lead.telefon || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">E-Mail</div><div class="k-detail-value">${escapeHtml(lead.email || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Kontakt Via</div><div class="k-detail-value">${escapeHtml(lead.kontaktVia || "—")}</div></div>
-        </div>
-        <div class="k-view-section">
-          <h4>Lead Informationen</h4>
-          <div class="k-detail-row"><div class="k-detail-label">Status</div><div class="k-detail-value"><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Lead Quelle</div><div class="k-detail-value">${escapeHtml(lead.quelle || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Bearbeiter</div><div class="k-detail-value">${escapeHtml(lead.bearbeiter || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Delegieren</div><div class="k-detail-value">${escapeHtml(lead.delegieren || "—")}</div></div>
-             <div class="k-detail-row"><div class="k-detail-label">Erstberatung Telefon</div><div class="k-detail-value">${escapeHtml(lead.erstberatung_telefon || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Angebot</div><div class="k-detail-value">${escapeHtml(lead.angebot || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Summe Netto</div><div class="k-detail-value">${escapeHtml(lead.summe)}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Datum</div><div class="k-detail-value">${escapeHtml(lead.datum)}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Nachfassen</div><div class="k-detail-value">${escapeHtml(lead.nachfassen || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Sales Typ</div><div class="k-detail-value">${escapeHtml(lead.salesTyp || "—")}</div></div>
-        </div>
-        <div class="k-view-section">
-          <h4>Dachdetails</h4>
-          <div class="k-detail-row"><div class="k-detail-label">Dachfläche (m²)</div><div class="k-detail-value">${escapeHtml(lead.dachflaeche || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Dacheindeckung</div><div class="k-detail-value">${escapeHtml(lead.dacheindeckung || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Baujahr Dach</div><div class="k-detail-value">${escapeHtml(lead.dachalter || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Dachpfanne</div><div class="k-detail-value">${escapeHtml(lead.dachpfanne || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Wunsch Farbe</div><div class="k-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
-          <div class="k-detail-row"><div class="k-detail-label">Dachneigung Grad</div><div class="k-detail-value">${escapeHtml(lead.dachneigung || "—")}</div></div>
-        </div>
-        
-        <div class="k-view-section">
-          <h4>📝 Notiz anzeigen</h4>
-          <div class="timeline-container">
-            ${notesHtml}
+          <div class="activity-row">
+            <div class="activity-label">Activity Date</div>
+            <div class="activity-value">${escapeHtml(activityStamp.date)}</div>
           </div>
-        </div>
-        
-        <div class="k-view-section">
-          <h4>⏱️ Aktivitätszeitleiste</h4>
-          <div class="timeline-container activity-timeline-wrap">
-            ${activitiesHtml}
+          <div class="activity-row">
+            <div class="activity-label">Activity Time</div>
+            <div class="activity-value">${escapeHtml(activityStamp.time)}</div>
           </div>
         </div>
       `;
+      }).join('');
+    } else {
+      activitiesHtml = `<div class="empty-activities">Keine Aktivitäten vorhanden</div>`;
     }
-  };
+    
+    contentEl.innerHTML = `
+      <div class="k-view-section">
+        <h4>Kontaktinformationen</h4>
+        <div class="k-detail-row"><div class="k-detail-label">Anrede</div><div class="k-detail-value">${escapeHtml(lead.salutation || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Name</div><div class="k-detail-value">${escapeHtml(lead.name)}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Ort</div><div class="k-detail-value">${escapeHtml(lead.ort)}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Straße</div><div class="k-detail-value">${escapeHtml(lead.strasse || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">PLZ</div><div class="k-detail-value">${escapeHtml(lead.plz || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Telefon</div><div class="k-detail-value">${escapeHtml(lead.telefon || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">E-Mail</div><div class="k-detail-value">${escapeHtml(lead.email || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Kontakt Via</div><div class="k-detail-value">${escapeHtml(lead.kontaktVia || "—")}</div></div>
+      </div>
+      <div class="k-view-section">
+        <h4>Lead Informationen</h4>
+        <div class="k-detail-row"><div class="k-detail-label">Status</div><div class="k-detail-value"><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Lead Quelle</div><div class="k-detail-value">${escapeHtml(lead.quelle || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Bearbeiter</div><div class="k-detail-value">${escapeHtml(lead.bearbeiter || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Delegieren</div><div class="k-detail-value">${escapeHtml(lead.delegieren || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Erstberatung Telefon</div><div class="k-detail-value">${escapeHtml(lead.erstberatung_telefon || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Angebot</div><div class="k-detail-value">${escapeHtml(lead.angebot || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Summe Netto</div><div class="k-detail-value">${escapeHtml(lead.summe)}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Datum</div><div class="k-detail-value">${escapeHtml(lead.datum)}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Nachfassen</div><div class="k-detail-value">${escapeHtml(lead.nachfassen || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Sales Typ</div><div class="k-detail-value">${escapeHtml(lead.salesTyp || "—")}</div></div>
+      </div>
+      <div class="k-view-section">
+        <h4>Dachdetails</h4>
+        <div class="k-detail-row"><div class="k-detail-label">Dachfläche (m²)</div><div class="k-detail-value">${escapeHtml(lead.dachflaeche || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Dacheindeckung</div><div class="k-detail-value">${escapeHtml(lead.dacheindeckung || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Baujahr Dach</div><div class="k-detail-value">${escapeHtml(lead.dachalter || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Dachpfanne</div><div class="k-detail-value">${escapeHtml(lead.dachpfanne || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Wunsch Farbe</div><div class="k-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Dachneigung Grad</div><div class="k-detail-value">${escapeHtml(lead.dachneigung || "—")}</div></div>
+      </div>
+      
+      <div class="k-view-section">
+        <h4>📝 Notizen</h4>
+        <div class="timeline-container">
+          ${notesHtml}
+        </div>
+      </div>
+      
+      <div class="k-view-section">
+        <h4>⏱️ Aktivitäten</h4>
+        <div class="timeline-container activity-timeline-wrap">
+          ${activitiesHtml}
+        </div>
+      </div>
+    `;
+  }
+};
 
  window.callKunde = async (id) => {
   const lead = leadsData.find((l) => l.id === id);
@@ -3937,6 +4048,7 @@ function saveStatusUpdate() {
     if (!contentArea) return;
     contentArea.innerHTML = getHTML();
 
+    console.log("Kunden API base:", getConfiguredApiBase() || window.location.origin);
     loadAllData();
     startAutoRefresh();
 
