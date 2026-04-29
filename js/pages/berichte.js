@@ -3,45 +3,54 @@ const berichtePage = (function () {
   // Live data populated from API
   let rawData = [];
 
-  // Same-origin first, fallback remote
+  // Same-origin Supabase proxy. Keep the service key on the server.
   const SO_LEADS = '/api/all_leads';
-  const REMOTE_LEADS_URL = 'https://goarrow.ai/test/fetch_all_leads.php';
 
-  async function fetchLeadsForReports() {
-    const tryFetch = async (url) => {
-      const r = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    };
+  function isMissingValue(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return !normalized || normalized === 'null' || normalized === 'undefined' || normalized === '—' || normalized === '-';
+  }
 
-    const PROXY1 = `https://corsproxy.io/?${encodeURIComponent(REMOTE_LEADS_URL)}`;
-    const PROXY2 = `https://api.allorigins.win/raw?url=${encodeURIComponent(REMOTE_LEADS_URL)}`;
-
-    const isLocalStatic = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
-    const candidates = isLocalStatic
-      ? [PROXY1, PROXY2, REMOTE_LEADS_URL, SO_LEADS]
-      : [SO_LEADS, REMOTE_LEADS_URL, PROXY1, PROXY2];
-
-    let data = null;
-    const errors = [];
-    for (const url of candidates) {
-      try { data = await tryFetch(url); break; }
-      catch (e) { errors.push(`${url}: ${e.message}`); }
+  function firstValue(...values) {
+    for (const value of values) {
+      if (!isMissingValue(value)) return String(value).trim();
     }
-    if (!data) {
-      console.warn('Berichte fetch failed. Tried ->', errors.join(' | '));
-      return [];
-    }
+    return '';
+  }
 
+  function toNumber(val) {
+    if (isMissingValue(val)) return 0;
+    if (typeof val === 'number' && isFinite(val)) return val;
+    const s = String(val).trim().replace(/[€$\s]/g, '');
+    if (/,\d{1,2}$/.test(s)) return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+    return parseFloat(s.replace(/,/g, '')) || 0;
+  }
+
+  function monthFromLead(item) {
+    const raw = firstValue(item.datum, item.date, item.lead_date, item.created_at);
+    const match = String(raw || '').match(/^(\d{4}-\d{2})/);
+    if (!match) return '';
+    const [year, month] = match[1].split('-').map(Number);
+    if (year < 1900 || month < 1 || month > 12) return '';
+    return match[1];
+  }
+
+  async function fetchSupabaseLeadsForReports() {
+    const r = await fetch(SO_LEADS, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    if (!r.ok) throw new Error(`Reports leads GET failed: HTTP ${r.status}`);
+    const data = await r.json();
     const list = Array.isArray(data) ? data : (data.data || data.leads || data.items || []);
+
     return (list || []).map(item => ({
-      status: item.status || 'Offen',
-      quelle: item.lead_quelle || '—',
-      summe: parseFloat(String(item.summe_netto || '0').replace(/[€$\s]/g,'').replace(/\./g,'').replace(/,/g,'.')) || 0,
-      bearbeiter: item.bearbeiter || '—',
-      monat: String(item.created_at || item.datum || '').slice(0,7)
+      status: firstValue(item.status, item.lead_status) || 'Offen',
+      quelle: firstValue(item.lead_quelle, item.quelle, item.source) || '—',
+      summe: toNumber(item.summe_netto),
+      bearbeiter: firstValue(item.bearbeiter, item.owner, item.assignee) || '—',
+      monat: monthFromLead(item)
     }));
   }
+
+  const fetchLeadsForReports = fetchSupabaseLeadsForReports;
 
   let currentFilter = 'Alle';
   let qChart = null;
@@ -58,13 +67,13 @@ const berichtePage = (function () {
     '#8d6e63','#90a4ae','#66bb6a','#ffa726','#26c6da',
   ];
 
-  // ── Filter helper ─────────────────────────────────────────────────────────
+  // -- Filter helper ---------------------------------------------------------
   function filtered() {
     if (currentFilter === 'Alle') return rawData;
     return rawData.filter(d => (d.bearbeiter || '—') === currentFilter);
   }
 
-  // ── Group by key ──────────────────────────────────────────────────────────
+  // -- Group by key ----------------------------------------------------------
   function groupBy(arr, key) {
     return arr.reduce((acc, d) => {
       acc[d[key]] = (acc[d[key]] || 0) + 1;
@@ -79,7 +88,7 @@ const berichtePage = (function () {
     }, {});
   }
 
-  // ── HTML ──────────────────────────────────────────────────────────────────
+  // -- HTML ------------------------------------------------------------------
   const getHTML = () => `
     <div class="berichte-container">
       <div class="berichte-header">
@@ -132,43 +141,7 @@ const berichtePage = (function () {
       <div class="b-summe-header">
         <div class="b-section-title" style="margin-bottom:0">Summe Netto</div>
         <select class="b-select" id="b-summe-filter">
-          <option value="">Wählen Sie eine Option sume...</option>
-<<<<<<< HEAD
-=======
-          <option value="Alle">Alle</option>
->>>>>>> eb17abbedcf4a8620a0783e7b569e410f0cbe9c7
-          <option value="2025-01">2025-01</option>
-          <option value="2025-02">2025-02</option>
-          <option value="2025-03">2025-03</option>
-          <option value="2025-04">2025-04</option>
-          <option value="2025-05">2025-05</option>
-          <option value="2025-06">2025-06</option>
-<<<<<<< HEAD
-          <option value="2025-07">2025-07</option>
-=======
->>>>>>> eb17abbedcf4a8620a0783e7b569e410f0cbe9c7
-          <option value="2025-08">2025-08</option>
-          <option value="2025-09">2025-09</option>
-          <option value="2025-10">2025-10</option>
-          <option value="2025-11">2025-11</option>
-          <option value="2025-12">2025-12</option>
-<<<<<<< HEAD
-           <option value="2025-11">2025-11</option>
-          <option value="2026-01">2026-01</option>
-          <option value="2026-02">2026-02</option>
-          <option value="2026-03">2025-03</option>
-          <option value="2026-04">2025-04</option>
-          <option value="2026-05">2025-05</option>
-          <option value="2026-06">2025-05</option>
-=======
-          <option value="2026-01">2026-01</option>
-          <option value="2026-02">2026-02</option>
-          <option value="2026-03">2026-03</option>
-          <option value="2026-04">2026-04</option>
-          <option value="2026-05">2026-05</option>
-          <option value="2026-06">2026-06</option>
-          <option value="2027-07">2027-07</option>
->>>>>>> eb17abbedcf4a8620a0783e7b569e410f0cbe9c7
+          <option value="">Wählen Sie eine Option...</option>
         </select>
       </div>
       <div class="b-card b-card-fullwidth" id="summe-chart-wrap" style="display:none">
@@ -178,7 +151,7 @@ const berichtePage = (function () {
     </div>
   `;
 
-  // ── CSS ───────────────────────────────────────────────────────────────────
+  // -- CSS -------------------------------------------------------------------
   function addStyles() {
     if (document.getElementById('berichte-styles')) return;
     const s = document.createElement('style');
@@ -273,7 +246,7 @@ const berichtePage = (function () {
     document.head.appendChild(s);
   }
 
-  // ── Load Chart.js dynamically ─────────────────────────────────────────────
+  // -- Load Chart.js dynamically ---------------------------------------------
   function loadChartJs(cb) {
     if (window.Chart) { cb(); return; }
     const script = document.createElement('script');
@@ -282,76 +255,24 @@ const berichtePage = (function () {
     document.head.appendChild(script);
   }
 
-  // ── Monthly totals fetch (Summe Netto) ───────────────────────────────────
-  async function fetchMonthlyTotals(bearbeiter = 'Alle') {
-    const SO = '/api/monthly_totals';
-    const REMOTE = 'https://goarrow.ai/test/fetch_monthly_totals.php';
-    const PROXY1 = `https://corsproxy.io/?${encodeURIComponent(REMOTE)}`;
-
-    const tryPostJson = async (url, body, timeoutMs = 2500) => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), timeoutMs);
-      try {
-        const r = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(body),
-          cache: 'no-store',
-          signal: ctrl.signal,
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return await r.json();
-      } finally { clearTimeout(t); }
-    };
-
-    const tryPostForm = async (url, body, timeoutMs = 2500) => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), timeoutMs);
-      try {
-        const params = new URLSearchParams();
-        Object.entries(body).forEach(([k,v]) => params.append(k, v ?? ''));
-        const r = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-          body: params.toString(),
-          cache: 'no-store',
-          signal: ctrl.signal,
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return await r.json();
-      } finally { clearTimeout(t); }
-    };
-
-    const isLocal = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
-    const candidates = isLocal
-      ? [() => tryPostForm(PROXY1, { bearbeiter }), () => tryPostForm(REMOTE, { bearbeiter }), () => tryPostJson(SO, { bearbeiter })]
-      : [() => tryPostJson(SO, { bearbeiter }), () => tryPostForm(REMOTE, { bearbeiter }), () => tryPostForm(PROXY1, { bearbeiter })];
-
-    let data = null; const errs = [];
-    for (const fn of candidates) {
-      try { data = await fn(); break; } catch (e) { errs.push(e.message); }
-    }
-    if (!data) { console.warn('Monthly totals fetch failed:', errs.join(' | ')); return []; }
-    const list = Array.isArray(data) ? data : (data.data || data.items || data.totals || []);
-
-    const toNumber = (val) => {
-      if (typeof val === 'number' && isFinite(val)) return val;
-      const s = String(val ?? '0').trim().replace(/[€\s]/g, '');
-      // If string ends with ",dd" it's EU decimal with thousand dots
-      if (/,\d{1,2}$/.test(s) && s.includes('.')) {
-        return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
-      }
-      // Otherwise, treat commas as thousand separators and keep '.' decimals
-      return parseFloat(s.replace(/,/g, '')) || 0;
-    };
-
-    return (list || []).map(x => {
-      const label = x.month || x.monat || x.label || x.date || x.period || '';
-      const rawVal = x.total ?? x.sum ?? x.summe ?? x.summe_netto ?? 0;
-      const value = toNumber(rawVal);
-      return { label: String(label), value };
+  // -- Monthly totals fetch (Summe Netto) -----------------------------------
+  // Monthly totals are derived from Supabase leads via GET.
+  const fetchMonthlyTotals = async function fetchSupabaseMonthlyTotals(bearbeiter = 'Alle') {
+    const params = new URLSearchParams({ bearbeiter: String(bearbeiter || 'Alle') });
+    const r = await fetch(`/api/monthly_totals?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
     });
-  }
+    if (!r.ok) throw new Error(`Monthly totals GET failed: HTTP ${r.status}`);
+
+    const data = await r.json();
+    const list = Array.isArray(data) ? data : (data.data || data.items || data.totals || []);
+    return (list || []).map(x => ({
+      label: String(x.month || x.monat || x.label || x.date || x.period || ''),
+      value: toNumber(x.total ?? x.sum ?? x.summe ?? x.summe_netto ?? x.value ?? 0),
+    }));
+  };
 
   function populateMonthsDropdown() {
     const sel = document.getElementById('b-summe-filter');
@@ -375,7 +296,7 @@ const berichtePage = (function () {
 
     // If Bearbeiter is "Alle", disable month selection entirely
     if (currentFilter === 'Alle') {
-      sel.innerHTML = '<option value="">Wählen Sie eine Option sume...</option>';
+      sel.innerHTML = '<option value="">Wählen Sie eine Option...</option>';
       sel.value = '';
       sel.disabled = true;
       // Also hide the chart/empty message via drawSumme()
@@ -405,7 +326,7 @@ const berichtePage = (function () {
 
     // Rebuild options: placeholder + Alle + months
     sel.innerHTML = [
-      '<option value="">Wählen Sie eine Option sume...</option>',
+      '<option value="">Wählen Sie eine Option...</option>',
       '<option value="Alle">Alle</option>',
       ...labels.map(m => `<option value="${m}">${m}</option>`)
     ].join('');
@@ -417,7 +338,7 @@ const berichtePage = (function () {
     sel.disabled = false;
   }
 
-  // ── Chart helpers ─────────────────────────────────────────────────────────
+  // -- Chart helpers ---------------------------------------------------------
   function destroyAll() {
     [qChart, qBarChart, sChart, sBarChart, gChart].forEach(c => c && c.destroy());
     qChart = qBarChart = sChart = sBarChart = gChart = null;
@@ -488,12 +409,12 @@ const berichtePage = (function () {
     };
   }
 
-  // ── Draw all charts ───────────────────────────────────────────────────────
+  // -- Draw all charts -------------------------------------------------------
   function drawCharts() {
     destroyAll();
     const data = filtered();
 
-    // ── 1. Gesamtzusammenfassung (status count bar) ──
+    // -- 1. Gesamtzusammenfassung (status count bar) --
     const statusCount = groupBy(data, 'status');
     const gLabels = Object.keys(statusCount);
     const gVals   = gLabels.map(k => statusCount[k]);
@@ -505,7 +426,7 @@ const berichtePage = (function () {
       gChart = new Chart(gCtx, cfg);
     }
 
-    // ── 2. Performance nach Quelle ──
+    // -- 2. Performance nach Quelle --
     const quelleCount = groupBy(data, 'quelle');
     const qLabels = Object.keys(quelleCount);
     const qVals   = qLabels.map(k => quelleCount[k]);
@@ -521,7 +442,7 @@ const berichtePage = (function () {
       qBarChart = new Chart(qBarCtx, cfg);
     }
 
-    // ── 3. Status-Übersicht ──
+    // -- 3. Status-Übersicht --
     const sLabels = Object.keys(statusCount);
     const sVals   = sLabels.map(k => statusCount[k]);
 
@@ -536,7 +457,7 @@ const berichtePage = (function () {
       sBarChart = new Chart(sBarCtx, cfg);
     }
 
-    // ── 4. Summe Netto – depends on dropdown ──
+    // -- 4. Summe Netto – depends on dropdown --
     drawSumme();
   }
 
@@ -628,7 +549,7 @@ const berichtePage = (function () {
     ctx._chart = new Chart(ctx, cfg);
   }
 
-  // ── Init ──────────────────────────────────────────────────────────────────
+  // -- Init ------------------------------------------------------------------
   function init(contentEl, titleEl) {
     addStyles();
 
@@ -679,7 +600,7 @@ const berichtePage = (function () {
       document.getElementById('b-summe-filter')?.addEventListener('change', drawSumme);
     });
 
-    console.log('✅ Berichte page loaded');
+    console.log('OK Berichte page loaded');
   }
 
   return { init };
@@ -689,3 +610,4 @@ window.berichtePage = berichtePage;
 // Alias for English route naming
 window.reportsPage = window.berichtePage;
 console.log('berichte.js loaded - window.berichtePage exists:', !!window.berichtePage);
+

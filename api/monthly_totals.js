@@ -1,47 +1,123 @@
 export default async function handler(req, res) {
-  const target = 'https://goarrow.ai/test/fetch_monthly_totals.php';
+  const target =
+    'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads?select=bearbeiter,summe_netto,datum,created_at&order=datum.asc';
+  const serviceRole = process.env.SERVICE_ROLE;
+  const pageSize = 1000;
 
-  // CORS preflight support for local dev
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  try {
-    // Accept JSON or form input; extract bearbeiter
-    let bearbeiter = 'Alle';
-    if (req.method === 'POST') {
-      const ct = req.headers['content-type'] || '';
-      if (ct.includes('application/json')) {
-        const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
-        bearbeiter = body.bearbeiter ?? 'Alle';
-      } else if (ct.includes('application/x-www-form-urlencoded')) {
-        let body = req.body;
-        if (typeof body === 'string') {
-          const p = new URLSearchParams(body);
-          body = Object.fromEntries(p.entries());
-        }
-        body = body ?? {};
-        bearbeiter = body.bearbeiter ?? 'Alle';
+  if (!['GET', 'POST'].includes(req.method)) {
+    res.setHeader('Allow', 'GET, POST, OPTIONS');
+    return res.status(405).json({ status: 'error', message: 'Method Not Allowed' });
+  }
+
+  if (!serviceRole) {
+    return res.status(500).json({ status: 'error', message: 'Missing SERVICE_ROLE env var' });
+  }
+
+  function getBearbeiter() {
+    if (req.method === 'GET') {
+      return String(req.query?.bearbeiter || 'Alle').trim() || 'Alle';
+    }
+
+    let body = req.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body || '{}');
+      } catch {
+        body = Object.fromEntries(new URLSearchParams(body).entries());
       }
     }
+    return String(body?.bearbeiter || 'Alle').trim() || 'Alle';
+  }
 
-    // Forward to upstream as application/x-www-form-urlencoded via POST
-    const params = new URLSearchParams();
-    params.append('bearbeiter', String(bearbeiter));
-    const r = await fetch(target, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-      body: params.toString(),
-    });
+  function isMissing(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return !normalized || normalized === 'null' || normalized === 'undefined' || normalized === '—' || normalized === '-';
+  }
 
-    const text = await r.text();
-    let json;
-    try { json = JSON.parse(text); } catch (e) {
-      return res.status(502).json({ status: 'error', message: 'Upstream sent invalid JSON' });
+  function parseAmount(value) {
+    if (isMissing(value)) return 0;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    const cleaned = String(value).trim().replace(/[€$\s]/g, '');
+    if (/,(\d{1,2})$/.test(cleaned)) {
+      return Number.parseFloat(cleaned.replace(/\./g, '').replace(',', '.')) || 0;
     }
-    res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=300');
-    return res.status(200).json(json);
+    return Number.parseFloat(cleaned.replace(/,/g, '')) || 0;
+  }
+
+  function monthFromRow(row) {
+    const raw = String(row?.datum || row?.created_at || '').trim();
+    const match = raw.match(/^(\d{4}-\d{2})/);
+    if (!match) return '';
+    const [year, month] = match[1].split('-').map(Number);
+    if (year < 1900 || month < 1 || month > 12) return '';
+    return match[1];
+  }
+
+  try {
+    const selectedBearbeiter = getBearbeiter();
+    const rows = [];
+    let start = 0;
+
+    while (true) {
+      const end = start + pageSize - 1;
+      const response = await fetch(target, {
+        headers: {
+          Accept: 'application/json',
+          apikey: serviceRole,
+          Authorization: `Bearer ${serviceRole}`,
+          Range: `${start}-${end}`,
+          'Range-Unit': 'items',
+        },
+      });
+
+      const text = await response.text();
+      if (!response.ok) {
+        return res.status(response.status).json({ status: 'error', message: text || `Supabase HTTP ${response.status}` });
+      }
+
+      let batch;
+      try {
+        batch = JSON.parse(text);
+      } catch {
+        return res.status(502).json({ status: 'error', message: 'Supabase sent invalid JSON' });
+      }
+
+      if (!Array.isArray(batch)) {
+        return res.status(502).json({ status: 'error', message: 'Supabase returned unexpected response shape' });
+      }
+
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+      start += pageSize;
+    }
+
+    const totals = new Map();
+    for (const row of rows) {
+      const bearbeiter = String(row?.bearbeiter ?? '').trim();
+      if (selectedBearbeiter !== 'Alle' && bearbeiter !== selectedBearbeiter) continue;
+
+      const month = monthFromRow(row);
+      if (!month) continue;
+      totals.set(month, (totals.get(month) || 0) + parseAmount(row?.summe_netto));
+    }
+
+    const data = [...totals.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([label, value]) => ({
+        label,
+        month: label,
+        value,
+        total: value,
+        summe_netto: value,
+      }));
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json({ status: 'success', data });
   } catch (err) {
     return res.status(500).json({ status: 'error', message: err.message });
   }

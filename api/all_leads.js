@@ -3,8 +3,17 @@ export default async function handler(req, res) {
   const serviceRole = process.env.SERVICE_ROLE;
   const pageSize = 1000;
 
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET, OPTIONS');
+    return res.status(405).json({ status: 'error', message: 'Method Not Allowed' });
+  }
+
   if (!serviceRole) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(500).json({ status: 'error', message: 'Missing SERVICE_ROLE env var' });
   }
 
@@ -25,7 +34,6 @@ export default async function handler(req, res) {
       });
       const text = await r.text();
       if (!r.ok) {
-        res.setHeader('Access-Control-Allow-Origin', '*');
         return res.status(r.status).json({ status: 'error', message: text || `Supabase HTTP ${r.status}` });
       }
 
@@ -33,12 +41,10 @@ export default async function handler(req, res) {
       try {
         batch = JSON.parse(text);
       } catch (e) {
-        res.setHeader('Access-Control-Allow-Origin', '*');
         return res.status(502).json({ status: 'error', message: 'Supabase sent invalid JSON' });
       }
 
       if (!Array.isArray(batch)) {
-        res.setHeader('Access-Control-Allow-Origin', '*');
         return res.status(502).json({ status: 'error', message: 'Supabase returned unexpected response shape' });
       }
 
@@ -51,11 +57,9 @@ export default async function handler(req, res) {
       start += pageSize;
     }
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json(allRows);
   } catch (err) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(500).json({ status: 'error', message: err.message });
   }
 }
