@@ -4,8 +4,11 @@ const berichtePage = (function () {
   let rawData = [];
 
   // Same-origin first, fallback remote
+  // const SO_LEADS = '/api/all_leads';
+  // const REMOTE_LEADS_URL = 'https://goarrow.ai/test/fetch_all_leads.php';
+
   const SO_LEADS = '/api/all_leads';
-  const REMOTE_LEADS_URL = 'https://goarrow.ai/test/fetch_all_leads.php';
+  const REMOTE_LEADS_URL = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads?select=created_at,monat,summe_netto,bearbeiter,lead_quelle,status';
 
   async function fetchLeadsForReports() {
     const tryFetch = async (url) => {
