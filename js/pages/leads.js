@@ -1447,7 +1447,7 @@
   // ─────────────────────────────────────────────
   // API FETCH
   // ─────────────────────────────────────────────
-  const LOCAL_DEV_API_ORIGIN = "http://127.0.0.1:3000";
+  const LOCAL_DEV_API_ORIGIN = "http://127.0.0.1:3001";
   const LEADS_SUPABASE_ENDPOINT =
     "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads";
   const NOTES_DIRECT_BASE =
@@ -1550,7 +1550,7 @@
         /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || "") &&
         location.port !== "3000";
 
-      if (isStaticLocalPage && isLocalCandidate && parsed.port !== "3000") {
+      if (isStaticLocalPage && isLocalCandidate && (parsed.port === location.port || parsed.port === "3000")) {
         return LOCAL_DEV_API_ORIGIN;
       }
     } catch {}

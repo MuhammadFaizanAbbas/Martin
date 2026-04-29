@@ -2,7 +2,7 @@
 const dashboardPage = (function() {
   let contentArea = null;
   let titleEl = null;
-  const LOCAL_DEV_API_ORIGIN = 'http://127.0.0.1:3000';
+  const LOCAL_DEV_API_ORIGIN = 'http://127.0.0.1:3001';
   const LEADS_CACHE_KEY = 'msdach-leads-cache-v1';
 
   const getHTML = () => `
@@ -417,15 +417,49 @@ const dashboardPage = (function() {
     try {
       const runtimeBase =
         typeof window !== 'undefined' ? window.__API_BASE__ : '';
-      if (runtimeBase) return String(runtimeBase).replace(/\/+$/, '');
+      const normalizedRuntimeBase = normalizeApiBaseCandidate(runtimeBase);
+      if (normalizedRuntimeBase) return normalizedRuntimeBase;
     } catch {}
 
     try {
       const storageBase = localStorage.getItem('msdach-api-base');
-      if (storageBase) return String(storageBase).replace(/\/+$/, '');
+      const normalizedStorageBase = normalizeApiBaseCandidate(storageBase);
+      if (normalizedStorageBase) return normalizedStorageBase;
+    } catch {}
+
+    try {
+      if (
+        typeof location !== 'undefined' &&
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || '') &&
+        location.port !== '3000'
+      ) {
+        return LOCAL_DEV_API_ORIGIN;
+      }
     } catch {}
 
     return '';
+  };
+
+  const normalizeApiBaseCandidate = (value) => {
+    const normalized = String(value || '').trim().replace(/\/+$/, '');
+    if (!normalized) return '';
+
+    try {
+      const parsed = new URL(normalized);
+      const isLocalCandidate = /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname || '');
+      const isStaticLocalPage =
+        typeof location !== 'undefined' &&
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || '') &&
+        location.port !== '3000';
+
+      if (isStaticLocalPage && isLocalCandidate && (parsed.port === location.port || parsed.port === '3000')) {
+        return LOCAL_DEV_API_ORIGIN;
+      }
+    } catch {
+      return '';
+    }
+
+    return normalized;
   };
 
   const resolveApiUrl = (path) => {

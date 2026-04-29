@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT_DIR = process.cwd();
 const API_DIR = path.join(ROOT_DIR, "api");
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3001);
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",

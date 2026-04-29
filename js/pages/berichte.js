@@ -12,6 +12,63 @@ const berichtePage = (function () {
   const SO_LEADS = '/api/all_leads';
   const REMOTE_LEADS_URL = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads?select=created_at,monat,summe_netto,bearbeiter,lead_quelle,status';
 //>>>>>>> 6abaa4740c276bc5190f4f33f2e6b445e4b8988c
+  const LOCAL_DEV_API_ORIGIN = 'http://127.0.0.1:3001';
+
+  function normalizeApiBaseCandidate(value) {
+    const normalized = String(value || '').trim().replace(/\/+$/, '');
+    if (!normalized) return '';
+
+    try {
+      const parsed = new URL(normalized);
+      const isLocalCandidate = /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname || '');
+      const isStaticLocalPage =
+        typeof location !== 'undefined' &&
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || '') &&
+        location.port !== '3000';
+
+      if (isStaticLocalPage && isLocalCandidate && (parsed.port === location.port || parsed.port === '3000')) {
+        return LOCAL_DEV_API_ORIGIN;
+      }
+    } catch {
+      return '';
+    }
+
+    return normalized;
+  }
+
+  function getConfiguredApiBase() {
+    try {
+      const runtimeBase = typeof window !== 'undefined' ? window.__API_BASE__ : '';
+      const normalizedRuntimeBase = normalizeApiBaseCandidate(runtimeBase);
+      if (normalizedRuntimeBase) return normalizedRuntimeBase;
+    } catch {}
+
+    try {
+      const storageBase = localStorage.getItem('msdach-api-base');
+      const normalizedStorageBase = normalizeApiBaseCandidate(storageBase);
+      if (normalizedStorageBase) return normalizedStorageBase;
+    } catch {}
+
+    try {
+      if (
+        typeof location !== 'undefined' &&
+        /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || '') &&
+        location.port !== '3000'
+      ) {
+        return LOCAL_DEV_API_ORIGIN;
+      }
+    } catch {}
+
+    return '';
+  }
+
+  function resolveApiUrl(path) {
+    if (!path) return path;
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = getConfiguredApiBase();
+    if (!base) return path;
+    return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+  }
 
   function isMissingValue(value) {
     const normalized = String(value ?? '').trim().toLowerCase();
@@ -43,7 +100,7 @@ const berichtePage = (function () {
   }
 
   async function fetchSupabaseLeadsForReports() {
-    const r = await fetch(SO_LEADS, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const r = await fetch(resolveApiUrl(SO_LEADS), { headers: { Accept: 'application/json' }, cache: 'no-store' });
     if (!r.ok) throw new Error(`Reports leads GET failed: HTTP ${r.status}`);
     const data = await r.json();
     const list = Array.isArray(data) ? data : (data.data || data.leads || data.items || []);
@@ -266,7 +323,7 @@ const berichtePage = (function () {
   // Monthly totals are derived from Supabase leads via GET.
   const fetchMonthlyTotals = async function fetchSupabaseMonthlyTotals(bearbeiter = 'Alle') {
     const params = new URLSearchParams({ bearbeiter: String(bearbeiter || 'Alle') });
-    const r = await fetch(`/api/monthly_totals?${params.toString()}`, {
+    const r = await fetch(`${resolveApiUrl('/api/monthly_totals')}?${params.toString()}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       cache: 'no-store',

@@ -40,6 +40,33 @@ export default async function handler(req, res) {
     'sale_typ',
   ]);
 
+  function normalizeDecimalInput(value) {
+    const cleaned = String(value ?? '')
+      .trim()
+      .replace(/[^\d,.-]/g, '');
+
+    if (!cleaned) return '';
+
+    const hasComma = cleaned.includes(',');
+    const hasDot = cleaned.includes('.');
+
+    if (hasComma && hasDot) {
+      const lastComma = cleaned.lastIndexOf(',');
+      const lastDot = cleaned.lastIndexOf('.');
+      const decimalSeparator = lastComma > lastDot ? ',' : '.';
+      const thousandSeparator = decimalSeparator === ',' ? '.' : ',';
+      return cleaned
+        .replace(new RegExp(`\\${thousandSeparator}`, 'g'), '')
+        .replace(decimalSeparator, '.');
+    }
+
+    if (hasComma) {
+      return cleaned.replace(/\./g, '').replace(',', '.');
+    }
+
+    return cleaned.replace(/,/g, '');
+  }
+
   if (!serviceRole) {
     return res.status(500).json({ status: 'error', message: 'Missing SERVICE_ROLE env var' });
   }
@@ -95,11 +122,7 @@ export default async function handler(req, res) {
     });
 
     if (filteredBody.summe_netto != null && filteredBody.summe_netto !== '') {
-      filteredBody.summe_netto = String(filteredBody.summe_netto)
-        .replace(/[^\d,.-]/g, '')
-        .replace(/\./g, '')
-        .replace(/,/g, '.')
-        .trim();
+      filteredBody.summe_netto = normalizeDecimalInput(filteredBody.summe_netto);
     }
 
     if (filteredBody.id == null || String(filteredBody.id).trim() === '') {

@@ -38,7 +38,7 @@ const ACTIVITY_LOG_API = "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/Aktiv
     return !isStaticDevHost;
   }
 
-  const LOCAL_DEV_API_ORIGIN = "http://127.0.0.1:3000";
+  const LOCAL_DEV_API_ORIGIN = "http://127.0.0.1:3001";
 
   function getLocalDevApiBaseUrl() {
     if (typeof window === "undefined") return "";
@@ -66,7 +66,7 @@ const ACTIVITY_LOG_API = "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/Aktiv
         /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || "") &&
         location.port !== "3000";
 
-      if (isStaticLocalPage && isLocalCandidate && parsed.port !== "3000") {
+      if (isStaticLocalPage && isLocalCandidate && (parsed.port === location.port || parsed.port === "3000")) {
         return LOCAL_DEV_API_ORIGIN;
       }
     } catch {
