@@ -611,7 +611,7 @@ const ACTIVITY_LOG_API = "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/Aktiv
   }
 
   function resolveActivityActor(preferred = "") {
-    const candidates = [preferred, bearbeiterFilter];
+    const candidates = [preferred, getCurrentUserName(), bearbeiterFilter];
     for (const value of candidates) {
       const normalized = String(value || "").trim();
       if (!isInvalidActivityActor(normalized)) return normalized;

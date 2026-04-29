@@ -839,17 +839,31 @@
   // ─────────────────────────────────────────────
   const INSERT_ACTIVITY_API_PATH = "/api/insert_activity";
 
+  function isInvalidActivityActor(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return (
+      !normalized ||
+      normalized === "?" ||
+      normalized === "???" ||
+      normalized === "system" ||
+      normalized === "created_by" ||
+      normalized === "null" ||
+      normalized === "undefined"
+    );
+  }
+
   function resolveActivityActor(preferred = "") {
     const candidates = [
       preferred,
+      getCurrentUserName(),
       typeof currentBearbeiter === "string" ? currentBearbeiter : "",
 
     ];
     for (const value of candidates) {
       const normalized = String(value || "").trim();
-      if (normalized && normalized !== "—") return normalized;
+      if (normalized !== "—" && !isInvalidActivityActor(normalized)) return normalized;
     }
-    return "System";
+    return "Bearbeiter unbekannt";
   }
 
   function getCurrentUserName() {
@@ -861,10 +875,10 @@
 
     for (const value of candidates) {
       const normalized = String(value || "").trim();
-      if (normalized && normalized !== "—") return normalized;
+      if (normalized !== "—" && !isInvalidActivityActor(normalized)) return normalized;
     }
 
-    return "System";
+    return "";
   }
 
   function addOptimisticActivity(leadId, activity) {
@@ -883,7 +897,7 @@
     eventLabel = "gesendet",
     timestampLabel = "",
   }) {
-    const safeActor = String(actor || "System").trim() || "System";
+    const safeActor = resolveActivityActor(actor);
     const safeTemplate = String(template || "").trim();
     const safeEmail = String(email || "").trim();
     const safeRecipient = String(recipientLabel || "").trim();
@@ -981,7 +995,7 @@
       return;
     }
 
-    const actor = resolveActivityActor(lead.bearbeiter);
+    const actor = resolveActivityActor();
     const activityText = `${actor} rief an ${phoneNumber}`;
     addOptimisticActivity(leadId, {
       text: activityText,
@@ -1919,7 +1933,10 @@ async function updateLeadOnAPI(id, payload) {
         a.username ||
         a.author ||
         a.created_by ||
-        "System";
+        "";
+      const actor = isInvalidActivityActor(by)
+        ? resolveActivityActor()
+        : String(by).trim();
       let at =
         a.at ||
         a.datetime ||
@@ -1933,9 +1950,16 @@ async function updateLeadOnAPI(id, payload) {
         const t = a.activity_time || a.activityTime || a.time;
         if (d || t) at = `${d || ""}${d && t ? " " : ""}${t || ""}`.trim();
       }
+      const normalizedText = String(text || "")
+        .replace(/^system\b/i, actor)
+        .replace(/^the system\b/i, actor)
+        .replace(/\bSent by:\s*System\b/i, `Sent by: ${actor}`)
+        .replace(/\bGesendet von:\s*System\b/i, `Gesendet von: ${actor}`)
+        .replace(/\bCreated by:\s*System\b/i, `Created by: ${actor}`)
+        .replace(/\bErstellt von:\s*System\b/i, `Erstellt von: ${actor}`);
       return {
-        text: String(text || ""),
-        by: String(by || "System"),
+        text: normalizedText,
+        by: actor,
         at: String(at || ""),
       };
     };
@@ -2330,7 +2354,7 @@ async function updateLeadOnAPI(id, payload) {
     const recipientNames = leadsWithEmails.map((item) =>
       String(item.name || subjectText || "").trim(),
     );
-    const source = resolveActivityActor(currentBearbeiter);
+    const source = resolveActivityActor();
     const sendBtn = document.getElementById("sendMassEmailBtn");
     const originalText = sendBtn?.textContent || "E-Mail senden";
 
@@ -2344,7 +2368,7 @@ async function updateLeadOnAPI(id, payload) {
         emails: recipients,
         names: recipientNames,
         action: selectedEmailTemplate,
-        source: "Martin",
+        source,
       });
 
       const activityTimestamp = new Date().toLocaleString("de-DE");
@@ -2353,7 +2377,7 @@ async function updateLeadOnAPI(id, payload) {
         leadsWithEmails.map(async (item) => {
           const leadId = item?.id;
           if (leadId == null) return;
-          const actor = resolveActivityActor(currentBearbeiter);
+          const actor = resolveActivityActor();
           const activityText = buildEmailActivityText({
             actor,
             template: selectedEmailTemplate,
@@ -2825,7 +2849,7 @@ async function updateLeadOnAPI(id, payload) {
       return;
     }
 
-    const actor = resolveActivityActor(lead.bearbeiter);
+    const actor = resolveActivityActor();
     const activityText = buildEmailActivityText({
       actor,
       template: "Standard",

@@ -453,8 +453,81 @@ const dashboardPage = (function() {
         }
       });
 
+// <<<<<<< HEAD
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+// =======      }
+    try {
+      const storageBase = localStorage.getItem('msdach-api-base');
+      if (storageBase) return String(storageBase).replace(/\/+$/, '');
+    } catch {}
+
+    return '';
+  };
+
+  const resolveApiUrl = (path) => {
+    const base = getConfiguredApiBase();
+    if (base) return `${base}${path}`;
+    if (!isStaticLocalHost()) return path;
+    return path;
+  };
+
+  const shouldTrySameOriginApi = () => {
+    return typeof location === 'undefined' || location.protocol !== 'file:' || Boolean(getConfiguredApiBase());
+  };
+
+  const extractLeadList = (payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== 'object') return [];
+    return payload.data || payload.leads || payload.items || payload.results || [];
+  };
+
+  const normalizeStatus = (status) => {
+    const value = String(status || '').trim().toLowerCase();
+    if (!value) return '';
+    if (value === 'offen') return 'Offen';
+    if (value === 'in bearbeitung') return 'in Bearbeitung';
+    if (value === 'follow up') return 'follow up';
+    if (value === 'infos eingeholt' || value === 'nur info eingeholt') return 'Nur Info eingeholt';
+    if (value === 'beauftragung') return 'Beauftragung';
+    if (value === 'ea beauftragung' || value === 'ea beauftragt') return 'EA Beauftragung';
+    if (value === 'nf beauftragung' || value === 'nf beauftragt' || value === 'nt beauftragt') return 'NF Beauftragung';
+    if (value === 'falscher kunde') return 'falscher Kunde';
+    if (value === 'ghoster') return 'Ghoster';
+    if (value === 'abgesagt') return 'Abgesagt';
+    if (value === '1x gesagt tot' || value === 'abgesagt tot') return 'Abgesagt tot';
+    if (value === 'storno' || value === 'storniert') return 'Storniert';
+    if (value === 'außerhalb einzugsgebiet' || value === 'ausserhalb einzugsgebiet') return 'Außerhalb Einzugsgebiet';
+    return '';
+  };
+
+  const summarizeLeads = (leads) => {
+    const summary = {
+      totalLeads: Array.isArray(leads) ? leads.length : 0,
+      totalSummeNetto: 0,
+      statuses: {
+        'Offen': 0,
+        'in Bearbeitung': 0,
+        'Beauftragung': 0,
+        'EA Beauftragung': 0,
+        'NF Beauftragung': 0,
+        'Nur Info eingeholt': 0,
+        'follow up': 0,
+        'falscher Kunde': 0,
+        'Ghoster': 0,
+        'Abgesagt': 0,
+        'Abgesagt tot': 0,
+        'Storniert': 0,
+        'Außerhalb Einzugsgebiet': 0,
+      },
+    };
+
+    (leads || []).forEach((lead) => {
+      const rawAmount = lead?.summe_netto ?? lead?.summe ?? 0;
+      const amount = Number.parseFloat(String(rawAmount).replace(/[^\d,.-]/g, '').replace(',', '.'));
+      if (Number.isFinite(amount)) {
+        summary.totalSummeNetto += amount;
+>>>>>>> be29b524aec6c7e6b28581270ed2ea642d26cdc1
       }
 
       const leads = await response.json();
@@ -507,7 +580,75 @@ const dashboardPage = (function() {
       }
     });
 
+// <<<<<<< HEAD
     // Update DOM
+// =======
+    return summary;
+  };
+
+  const readLeadsCache = () => {
+    try {
+      const raw = localStorage.getItem(LEADS_CACHE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed?.leads) ? parsed.leads : [];
+    } catch (error) {
+      console.warn('Unable to read cached leads:', error.message);
+      return [];
+    }
+  };
+
+  // Update dashboard with data from API
+  const updateDashboardWithData = (data) => {
+    const dataMap = data?.data && typeof data.data === 'object' ? data.data : data;
+
+    if (dataMap && typeof dataMap === 'object') {
+      console.log('✅ API Data received successfully!');
+      console.log('📊 Full API Response:', data);
+
+      // Update total leads
+      const totalLeadsEl = document.getElementById('total-leads');
+      if (totalLeadsEl) {
+        const totalLeads = Number.isFinite(Number(data.total_leads))
+          ? Number(data.total_leads)
+          : Object.values(dataMap).reduce((sum, value) => sum + (Number(value) || 0), 0);
+        const formattedLeads = formatNumber(totalLeads);
+        totalLeadsEl.textContent = formattedLeads;
+        console.log(`📈 Gesamt-Leads: ${formattedLeads}`);
+      }
+
+      // Update Nettosumme
+      const totalSummeEl = document.getElementById('total-summe');
+      if (totalSummeEl) {
+        const formattedSumme = formatCurrency(Number(data.total_summe_netto) || 0);
+        totalSummeEl.textContent = formattedSumme;
+        console.log(`💰 Nettosumme: ${formattedSumme}`);
+      }
+
+      // Update each status card
+      for (const [key, value] of Object.entries(dataMap)) {
+        const element = document.getElementById(key);
+        if (element) {
+          const formattedValue = formatNumber(value);
+          element.textContent = formattedValue;
+          console.log(`  ✓ ${key}: ${formattedValue}`);
+        } else {
+          console.warn(`⚠️ Element with ID "${key}" not found in DOM`);
+        }
+      }
+
+      console.log('🎉 Dashboard update complete!');
+      return true;
+    } else {
+      console.error('❌ Invalid data format from API:', data);
+      return false;
+    }
+  };
+
+  const updateDashboardFromLeads = (leads) => {
+    const summary = summarizeLeads(leads);
+
+>>>>>>> be29b524aec6c7e6b28581270ed2ea642d26cdc1
     const totalLeadsEl = document.getElementById('total-leads');
     if (totalLeadsEl) {
       totalLeadsEl.textContent = formatNumber(totalLeads);
@@ -560,8 +701,13 @@ const dashboardPage = (function() {
         font-size: 14px;
       `;
       errorDiv.innerHTML = `
+
         <strong>⚠️ Error:</strong> Could not fetch leads from Supabase<br>
         ${error?.message || 'Please check your configuration or try again later.'}
+
+        <strong>⚠️ API Error:</strong> Could not fetch lead totals from /api/dashboard<br>
+        Please check the API endpoint or contact support.
+ be29b524aec6c7e6b28581270ed2ea642d26cdc1
       `;
       container.appendChild(errorDiv);
     }
