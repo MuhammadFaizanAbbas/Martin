@@ -13,7 +13,10 @@ export default async function handler(req, res) {
 
   const targetBase =
     "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads";
-  const serviceRole = process.env.SERVICE_ROLE;
+  const serviceRole =
+    process.env.SERVICE_ROLE ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE;
   const allowedColumns = new Set([
     "name",
     "erstberatung_telefon",
@@ -71,7 +74,7 @@ export default async function handler(req, res) {
   if (!serviceRole) {
     return res
       .status(500)
-      .json({ status: "error", message: "Missing SERVICE_ROLE env var" });
+      .json({ status: "error", message: "Missing SERVICE_ROLE or SUPABASE_SERVICE_ROLE_KEY env var" });
   }
 
   try {

@@ -616,7 +616,7 @@ const dashboardPage = (function() {
   };
 
   // Show error message on dashboard
-  const showErrorMessage = () => {
+  const showErrorMessage = (message = '') => {
     document.querySelectorAll('.card-value').forEach(el => {
       if (el.textContent === '--') el.textContent = 'Error';
     });
@@ -664,12 +664,22 @@ const dashboardPage = (function() {
           headers: { 'Accept': 'application/json' },
           cache: 'no-store',
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorMessage = errorText || `HTTP ${response.status}`;
+          try {
+            const parsed = JSON.parse(errorText);
+            errorMessage = parsed?.message || parsed?.error || errorMessage;
+          } catch {}
+          throw new Error(`HTTP ${response.status}: ${errorMessage}`);
+        }
         const data = await response.json();
         updateDashboardWithData(data);
         return;
       } catch (error) {
         console.warn('Same-origin dashboard fetch failed:', error.message);
+        showErrorMessage(error.message);
+        return;
       }
     }
 

@@ -1,11 +1,14 @@
 export default async function handler(req, res) {
   const target = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads?select=*&order=id.asc';
-  const serviceRole = process.env.SERVICE_ROLE;
+  const serviceRole =
+    process.env.SERVICE_ROLE ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE;
   const pageSize = 1000;
 
   if (!serviceRole) {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(500).json({ status: 'error', message: 'Missing SERVICE_ROLE env var' });
+    return res.status(500).json({ status: 'error', message: 'Missing SERVICE_ROLE or SUPABASE_SERVICE_ROLE_KEY env var' });
   }
 
   try {

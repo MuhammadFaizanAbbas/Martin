@@ -10,7 +10,10 @@ export default async function handler(req, res) {
   }
 
   const targetBase = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/Aktivit%C3%A4tsprotokoll';
-  const serviceRole = process.env.SERVICE_ROLE;
+  const serviceRole =
+    process.env.SERVICE_ROLE ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE;
   const { lead_id, id } = req.query || {};
   const leadId = String(lead_id || id || '').trim();
 
@@ -19,7 +22,7 @@ export default async function handler(req, res) {
   }
 
   if (!serviceRole) {
-    return res.status(500).json({ status: 'error', message: 'Missing SERVICE_ROLE env var' });
+    return res.status(500).json({ status: 'error', message: 'Missing SERVICE_ROLE or SUPABASE_SERVICE_ROLE_KEY env var' });
   }
 
   const targets = [
