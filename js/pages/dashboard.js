@@ -692,5 +692,3 @@ const fetchDashboardData = async () => {
 // Register to window object
 window.dashboardPage = dashboardPage;
 console.log('📁 dashboard.js loaded - window.dashboardPage exists:', !!window.dashboardPage);
-
-
