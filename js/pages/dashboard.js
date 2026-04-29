@@ -2,10 +2,7 @@
 const dashboardPage = (function() {
   let contentArea = null;
   let titleEl = null;
-  
-  // Supabase direct configuration
-  const SUPABASE_URL = 'https://bmnxecoddcxcwvqukujh.supabase.co';
-  const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY_HERE'; // You need to add your anon key
+  const LOCAL_DEV_API_ORIGIN = 'http://127.0.0.1:3000';
   const LEADS_CACHE_KEY = 'msdach-leads-cache-v1';
 
   const getHTML = () => `
@@ -397,37 +394,6 @@ const dashboardPage = (function() {
     document.head.appendChild(styles);
   };
 
-  // Normalize status to match frontend expectations
-  const normalizeStatus = (status) => {
-    const value = String(status || '').trim().toLowerCase();
-    if (!value) return '';
-    
-    const statusMap = {
-      'offen': 'Offen',
-      'tne offen': 'Offen',
-      'in bearbeitung': 'in Bearbeitung',
-      'follow up': 'follow up',
-      'beauftragung': 'Beauftragung',
-      'ea beauftragung': 'EA Beauftragung',
-      'ea beauftragt': 'EA Beauftragung',
-      'nf beauftragung': 'NF Beauftragung',
-      'nf beauftragt': 'NF Beauftragung',
-      'nur info eingeholt': 'Nur Info eingeholt',
-      'infos eingeholt': 'Nur Info eingeholt',
-      'falscher kunde': 'falscher Kunde',
-      'ghoster': 'Ghoster',
-      'abgesagt': 'Abgesagt',
-      'abgesagt tot': 'Abgesagt tot',
-      '1x gesagt tot': 'Abgesagt tot',
-      'storniert': 'Storniert',
-      'storno': 'Storniert',
-      'außerhalb einzugsgebiet': 'Außerhalb Einzugsgebiet',
-      'ausserhalb einzugsgebiet': 'Außerhalb Einzugsgebiet'
-    };
-    
-    return statusMap[value] || '';
-  };
-
   // Format number with commas (German format)
   const formatNumber = (num) => {
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -440,23 +406,20 @@ const dashboardPage = (function() {
     return `€ ${formattedInteger}.${decimal}`;
   };
 
-  // Fetch leads directly from Supabase
-  const fetchLeadsFromSupabase = async () => {
-    try {
-      const url = `${SUPABASE_URL}/rest/v1/leads?select=status,summe_netto`;
-      
-      const response = await fetch(url, {
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Accept': 'application/json'
-        }
-      });
+  const isStaticLocalHost = () => {
+    return (
+      typeof location !== 'undefined' &&
+      (location.protocol === 'file:' || /^(localhost|127\.0\.0\.1)$/i.test(location.hostname || ''))
+    );
+  };
 
-// <<<<<<< HEAD
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-// =======      }
+  const getConfiguredApiBase = () => {
+    try {
+      const runtimeBase =
+        typeof window !== 'undefined' ? window.__API_BASE__ : '';
+      if (runtimeBase) return String(runtimeBase).replace(/\/+$/, '');
+    } catch {}
+
     try {
       const storageBase = localStorage.getItem('msdach-api-base');
       if (storageBase) return String(storageBase).replace(/\/+$/, '');
@@ -527,62 +490,14 @@ const dashboardPage = (function() {
       const amount = Number.parseFloat(String(rawAmount).replace(/[^\d,.-]/g, '').replace(',', '.'));
       if (Number.isFinite(amount)) {
         summary.totalSummeNetto += amount;
->>>>>>> be29b524aec6c7e6b28581270ed2ea642d26cdc1
       }
 
-      const leads = await response.json();
-      
-      if (!Array.isArray(leads)) {
-        throw new Error('Invalid response format from Supabase');
-      }
-
-      return leads;
-    } catch (error) {
-      console.error('Error fetching from Supabase:', error);
-      throw error;
-    }
-  };
-
-  // Process leads and update dashboard
-  const processAndUpdateDashboard = (leads) => {
-    // Initialize counters
-    const counts = {
-      'Offen': 0,
-      'in Bearbeitung': 0,
-      'Beauftragung': 0,
-      'EA Beauftragung': 0,
-      'NF Beauftragung': 0,
-      'Nur Info eingeholt': 0,
-      'follow up': 0,
-      'falscher Kunde': 0,
-      'Ghoster': 0,
-      'Abgesagt': 0,
-      'Abgesagt tot': 0,
-      'Storniert': 0,
-      'Außerhalb Einzugsgebiet': 0,
-    };
-
-    let totalSummeNetto = 0;
-    let totalLeads = leads.length;
-
-    // Process each lead
-    leads.forEach(lead => {
-      // Calculate summe_netto
-      const summeNetto = parseFloat(lead?.summe_netto) || 0;
-      if (!isNaN(summeNetto)) {
-        totalSummeNetto += summeNetto;
-      }
-
-      // Count status
-      const status = normalizeStatus(lead?.status);
-      if (status && counts.hasOwnProperty(status)) {
-        counts[status] += 1;
+      const key = normalizeStatus(lead?.status);
+      if (key && Object.prototype.hasOwnProperty.call(summary.statuses, key)) {
+        summary.statuses[key] += 1;
       }
     });
 
-// <<<<<<< HEAD
-    // Update DOM
-// =======
     return summary;
   };
 
@@ -648,41 +563,26 @@ const dashboardPage = (function() {
   const updateDashboardFromLeads = (leads) => {
     const summary = summarizeLeads(leads);
 
->>>>>>> be29b524aec6c7e6b28581270ed2ea642d26cdc1
     const totalLeadsEl = document.getElementById('total-leads');
     if (totalLeadsEl) {
-      totalLeadsEl.textContent = formatNumber(totalLeads);
+      totalLeadsEl.textContent = formatNumber(summary.totalLeads);
     }
 
     const totalSummeEl = document.getElementById('total-summe');
     if (totalSummeEl) {
-      totalSummeEl.textContent = formatCurrency(totalSummeNetto);
+      totalSummeEl.textContent = formatCurrency(summary.totalSummeNetto);
     }
 
-    // Update each status card
-    for (const [key, value] of Object.entries(counts)) {
+    Object.entries(summary.statuses).forEach(([key, value]) => {
       const element = document.getElementById(key);
       if (element) {
         element.textContent = formatNumber(value);
       }
-    }
-
-    // Cache the leads for offline use
-    try {
-      localStorage.setItem(LEADS_CACHE_KEY, JSON.stringify({ leads, timestamp: Date.now() }));
-    } catch (e) {
-      console.warn('Could not cache leads:', e);
-    }
-
-    console.log('✅ Dashboard updated successfully!', {
-      totalLeads,
-      totalSummeNetto: formatCurrency(totalSummeNetto),
-      counts
     });
   };
 
   // Show error message on dashboard
-  const showErrorMessage = (error) => {
+  const showErrorMessage = () => {
     document.querySelectorAll('.card-value').forEach(el => {
       if (el.textContent === '--') el.textContent = 'Error';
     });
@@ -701,42 +601,61 @@ const dashboardPage = (function() {
         font-size: 14px;
       `;
       errorDiv.innerHTML = `
-
-        <strong>⚠️ Error:</strong> Could not fetch leads from Supabase<br>
-        ${error?.message || 'Please check your configuration or try again later.'}
-
         <strong>⚠️ API Error:</strong> Could not fetch lead totals from /api/dashboard<br>
         Please check the API endpoint or contact support.
- be29b524aec6c7e6b28581270ed2ea642d26cdc1
       `;
       container.appendChild(errorDiv);
     }
   };
 
-  // Main fetch function
-  const fetchDashboardData = async () => {
-    try {
-      const leads = await fetchLeadsFromSupabase();
-      processAndUpdateDashboard(leads);
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
-      
-      // Try to use cached data
+  // Fetch via a CORS proxy URL
+  const fetchWithProxy = async (proxyUrl) => {
+    const response = await fetch(proxyUrl, {
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const leads = extractLeadList(data);
+    if (!leads.length && !Array.isArray(data)) throw new Error('Invalid leads response format');
+    return leads.length ? leads : data;
+  };
+
+  const fetchLeadsForDashboard = async () => {
+    const SAME_ORIGIN_API = resolveApiUrl('/api/dashboard');
+    const cacheBust = `_ts=${Date.now()}`;
+
+    if (shouldTrySameOriginApi()) {
       try {
-        const cached = localStorage.getItem(LEADS_CACHE_KEY);
-        if (cached) {
-          const { leads } = JSON.parse(cached);
-          if (leads && leads.length) {
-            console.log('Using cached leads data');
-            processAndUpdateDashboard(leads);
-            return;
-          }
-        }
-      } catch (e) {
-        console.warn('Could not read cache:', e);
+        const response = await fetch(`${SAME_ORIGIN_API}?${cacheBust}`, {
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        updateDashboardWithData(data);
+        return;
+      } catch (error) {
+        console.warn('Same-origin dashboard fetch failed:', error.message);
       }
-      
-      showErrorMessage(error);
+    }
+
+    // No external fallbacks - dashboard relies on local API
+    showErrorMessage();
+  };
+
+  // Main fetch function — tries same-origin API, then multiple CORS proxies in order
+const fetchDashboardData = async () => {
+    try {
+      await fetchLeadsForDashboard();
+    } catch (err) {
+      console.warn('Dashboard leads fetch failed:', err.message);
+      const cachedLeads = readLeadsCache();
+      if (cachedLeads.length) {
+        console.log(`Using cached leads for dashboard: ${cachedLeads.length}`);
+        updateDashboardFromLeads(cachedLeads);
+        return;
+      }
+      showErrorMessage();
     }
   };
 
@@ -745,18 +664,13 @@ const dashboardPage = (function() {
     titleEl = titleElement;
 
     console.log('🚀 Initializing Dashboard Page...');
-    
-    // Check if Supabase key is configured
-    if (!SUPABASE_ANON_KEY || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY_HERE') {
-      console.error('❌ Supabase Anon Key not configured!');
-      console.log('Please add your Supabase anon key to the SUPABASE_ANON_KEY variable');
-    }
+    console.log('⏰ Start time:', new Date().toLocaleTimeString());
 
     // Add dashboard specific styles
     addDashboardStyles();
 
-    // Hide/show main page header
-    if (titleEl) {
+    // HIDE the main page header
+      if (titleEl) {
       titleEl.innerHTML = `<h1>Dashboard</h1><p>Verfolgen Sie die Leistung Ihres Dachbeschichtungsunternehmens</p>`;
       titleEl.style.display = 'block';
     }
@@ -765,11 +679,8 @@ const dashboardPage = (function() {
       contentArea.innerHTML = getHTML();
       console.log('📄 Dashboard HTML rendered');
 
-      // Fetch live data from Supabase
+      // Fetch live data from API
       fetchDashboardData();
-      
-      // Refresh data every 5 minutes
-      setInterval(fetchDashboardData, 5 * 60 * 1000);
     }
 
     console.log('✅ Dashboard page initialized successfully');
