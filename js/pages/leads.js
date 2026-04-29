@@ -1071,6 +1071,30 @@
     });
   }
 
+  function isMissingApiValue(value) {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    return (
+      value == null ||
+      !normalized ||
+      normalized === "null" ||
+      normalized === "undefined" ||
+      normalized === "—" ||
+      normalized === "-"
+    );
+  }
+
+  function formatSummeNetto(value) {
+    if (isMissingApiValue(value)) return "-";
+    const numberValue = Number.parseFloat(
+      String(value).replace(/[^\d,.-]/g, "").replace(",", "."),
+    );
+    if (!Number.isFinite(numberValue)) return "-";
+    return `$ ${numberValue.toLocaleString("de-DE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+
   function normalizeLeadIdentityValue(value) {
     const normalized = String(value ?? "")
       .trim()
@@ -1121,8 +1145,7 @@
   }
 
   function euro(amount) {
-    const raw = parseFloat(amount) || 0;
-    return `$ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`;
+    return formatSummeNetto(amount);
   }
 
   function applyPendingUpdates(list) {
@@ -1204,7 +1227,7 @@
   function firstNonEmpty(...values) {
     for (const value of values) {
       const normalized = String(value ?? "").trim();
-      if (normalized && normalized !== "—" && normalized !== "null") {
+      if (!isMissingApiValue(value)) {
         return normalized;
       }
     }
@@ -1372,7 +1395,7 @@
         apiLead.summe,
         apiLead.total_netto,
         apiLead.total,
-      ) || "0.00";
+      );
     const leadDate = firstNonEmpty(
       apiLead.datum,
       apiLead.date,
@@ -1396,10 +1419,7 @@
       quelle,
       bearbeiter,
       delegieren,
-      summe:
-        netto !== "0.00"
-          ? `$ ${formatNumber(netto)}`
-          : "$ 0,00",
+      summe: formatSummeNetto(netto),
       datum: formatShortDate(leadDate) || "—",
       nachfassen: formatShortDate(followUpDate) || "",
       salutation: apiLead.salutation || "",
@@ -2597,7 +2617,9 @@ async function updateLeadOnAPI(id, payload) {
     setFieldValue("editDelegieren", lead.delegieren || "");  // ADD THIS LINE
     setFieldValue(
       "editSumme",
-      lead.summe
+      lead.summe === "-"
+        ? ""
+        : lead.summe
         .replace(/[$$]/g, "")
         .replace(/\./g, "")
         .replace(",", ".")
@@ -2922,13 +2944,12 @@ async function updateLeadOnAPI(id, payload) {
   }
 
   function addLead(data) {
-    const raw = parseFloat(data.summe) || 0;
     const newLead = {
       id: Date.now(),
       createdAt: new Date().toISOString(),
       ...data,
       statusClass: getStatusClass(data.status),
-      summe: `$ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      summe: formatSummeNetto(data.summe),
       datum: data.datum || new Date().toISOString().split("T")[0],
       notes: [],
     };
@@ -2945,7 +2966,7 @@ async function updateLeadOnAPI(id, payload) {
       createdAt: new Date().toISOString(),
       ...data,
       statusClass: getStatusClass(data.status),
-      summe: `$ ${(parseFloat(data.summe) || 0).toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      summe: formatSummeNetto(data.summe),
       datum: data.datum || new Date().toISOString().split("T")[0],
       notes: [],
     };
@@ -2959,7 +2980,6 @@ async function updateLeadOnAPI(id, payload) {
   function updateLead(id, data) {
     const idx = fullLeadsData.findIndex((l) => l.id == id);
     if (idx === -1) return;
-    const raw = parseFloat(data.summe) || 0;
     const normalizedBriefberatungTelefon = normalizeBriefberatungTelefonValue(
       data.briefberatungTelefon,
     );
@@ -2972,7 +2992,7 @@ async function updateLeadOnAPI(id, payload) {
       ...fullLeadsData[idx],
       ...normalizedPatch,
       statusClass: getStatusClass(data.status),
-      summe: `$ ${raw.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
+      summe: formatSummeNetto(data.summe),
     };
     // Track as pending update until backend reflects it
     pendingUpdates.set(String(id), normalizedPatch);
@@ -3208,6 +3228,7 @@ if (currentEditId) {
             datum: data.datum,
             nachfassen: data.nachfassen,
             bearbeiter: data.bearbeiter,
+            delegieren: data.delegieren,
             summe_netto: data.summe,
             dachflaeche_m2: data.dachflaeche,
             dachneigung_grad: data.dachneigung,
