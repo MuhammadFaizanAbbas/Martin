@@ -3,8 +3,15 @@ const berichtePage = (function () {
   // Live data populated from API
   let rawData = [];
 
+//<<<<<<< HEAD
   // Same-origin Supabase proxy. Keep the service key on the server.
+  // Same-origin first, fallback remote
+  // const SO_LEADS = '/api/all_leads';
+  // const REMOTE_LEADS_URL = 'https://goarrow.ai/test/fetch_all_leads.php';
+
   const SO_LEADS = '/api/all_leads';
+  const REMOTE_LEADS_URL = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads?select=created_at,monat,summe_netto,bearbeiter,lead_quelle,status';
+//>>>>>>> 6abaa4740c276bc5190f4f33f2e6b445e4b8988c
 
   function isMissingValue(value) {
     const normalized = String(value ?? '').trim().toLowerCase();
