@@ -436,7 +436,7 @@ const dashboardPage = (function() {
   };
 
   const shouldTrySameOriginApi = () => {
-    return !isStaticLocalHost() || Boolean(getConfiguredApiBase());
+    return typeof location === 'undefined' || location.protocol !== 'file:' || Boolean(getConfiguredApiBase());
   };
 
   const extractLeadList = (payload) => {
@@ -515,14 +515,19 @@ const dashboardPage = (function() {
 
   // Update dashboard with data from API
   const updateDashboardWithData = (data) => {
-    if (data.status === 'success' && data.data) {
+    const dataMap = data?.data && typeof data.data === 'object' ? data.data : data;
+
+    if (dataMap && typeof dataMap === 'object') {
       console.log('✅ API Data received successfully!');
       console.log('📊 Full API Response:', data);
 
       // Update total leads
       const totalLeadsEl = document.getElementById('total-leads');
       if (totalLeadsEl) {
-        const formattedLeads = formatNumber(data.total_leads);
+        const totalLeads = Number.isFinite(Number(data.total_leads))
+          ? Number(data.total_leads)
+          : Object.values(dataMap).reduce((sum, value) => sum + (Number(value) || 0), 0);
+        const formattedLeads = formatNumber(totalLeads);
         totalLeadsEl.textContent = formattedLeads;
         console.log(`📈 Gesamt-Leads: ${formattedLeads}`);
       }
@@ -530,14 +535,12 @@ const dashboardPage = (function() {
       // Update Nettosumme
       const totalSummeEl = document.getElementById('total-summe');
       if (totalSummeEl) {
-        const formattedSumme = formatCurrency(data.total_summe_netto);
+        const formattedSumme = formatCurrency(Number(data.total_summe_netto) || 0);
         totalSummeEl.textContent = formattedSumme;
         console.log(`💰 Nettosumme: ${formattedSumme}`);
       }
 
       // Update each status card
-      const dataMap = data.data;
-
       for (const [key, value] of Object.entries(dataMap)) {
         const element = document.getElementById(key);
         if (element) {
@@ -598,7 +601,7 @@ const dashboardPage = (function() {
         font-size: 14px;
       `;
       errorDiv.innerHTML = `
-        <strong>⚠️ API Error:</strong> Could not fetch lead totals from /api/leads<br>
+        <strong>⚠️ API Error:</strong> Could not fetch lead totals from /api/dashboard<br>
         Please check the API endpoint or contact support.
       `;
       container.appendChild(errorDiv);

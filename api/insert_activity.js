@@ -142,18 +142,26 @@ export default async function handler(req, res) {
         id: nextId,
         lead_id: leadId,
         description,
-      }),
-      compactPayload({
-        id: nextId,
-        lead_id: leadId,
-        description,
         created_by: actor,
       }),
       compactPayload({
         id: nextId,
         lead_id: leadId,
         description,
+        created_by: actor,
         from: actor,
+        user: actor,
+      }),
+      compactPayload({
+        id: nextId,
+        lead_id: leadId,
+        description,
+        from: actor,
+      }),
+      compactPayload({
+        id: nextId,
+        lead_id: leadId,
+        description,
       }),
     ];
 
