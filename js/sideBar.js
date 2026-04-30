@@ -37,6 +37,10 @@ const SidebarManager = (function() {
 
   // Handle logout
   function handleLogout() {
+    if (window.MSDachAuth && typeof window.MSDachAuth.logout === 'function') {
+      if (confirm('Möchten Sie sich abmelden?')) window.MSDachAuth.logout();
+      return;
+    }
     if (confirm('Möchten Sie sich abmelden?')) {
       alert('Sie wurden abgemeldet');
       // Redirect to dashboard

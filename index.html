@@ -10,6 +10,35 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<section class="auth-screen" id="authScreen" aria-label="Login">
+  <div class="auth-panel">
+    <div class="auth-logo">
+      <div class="auth-logo-mark">M</div>
+      <div class="auth-logo-text">
+        <strong>MS DACH GMBH</strong>
+        <span>schnell, zuverlässig, flexibel</span>
+      </div>
+    </div>
+
+    <div class="auth-copy">
+      <h1 id="authTitle">Willkommen zurück</h1>
+      <p id="authSubtitle">Bitte melden Sie sich an um fortzufahren</p>
+    </div>
+
+    <form class="auth-form" id="loginForm">
+      <label for="loginEmail">Email</label>
+      <input type="email" id="loginEmail" autocomplete="email" placeholder="Geben Sie Ihre E-Mail-Adresse ein">
+
+      <label for="loginPassword">Passwort</label>
+      <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Geben Sie Ihr Passwort ein">
+
+      <button type="submit" class="auth-primary-btn">Login</button>
+    </form>
+
+    <div class="auth-message" id="authMessage" role="status"></div>
+  </div>
+</section>
+
 <div class="app-container">
   <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">
@@ -139,6 +168,7 @@
 </div>
 
 <!-- Scripts -->
+<script src="js/auth.js"></script>
 <script src="js/sideBar.js"></script>
 <!-- <script src="/main.js"></script> -->
 <script src="js/page.js"></script>

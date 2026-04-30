@@ -6,6 +6,8 @@ const einstellungPage = (function () {
   const UPDATE_DELEGIEREN_SAME = "/api/update_delegieren";
   const UPDATE_DELEGIEREN_DIRECT = "https://goarrow.ai/test/update_delegieren.php";
   const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
+  const LOCAL_DEV_API_ORIGIN = "http://127.0.0.1:3001";
+  const ROLE_OPTIONS = ["admin", "teamlead", "backoffice", "monteur"];
   const ASSIGNEE_OPTIONS = ["Philipp", "André", "Martin", "Simon"];
   const DEFAULT_USERS = [
     { id: 1, vorname: "Martin", nachname: "Schwaak", email: "admin@msdach.com", passwort: "********", rolle: "admin", active: true, delegatedTo: "" },
@@ -43,6 +45,96 @@ const einstellungPage = (function () {
       localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
     } catch {}
     syncDelegationRules();
+    if (window.MSDachAuth && typeof window.MSDachAuth.applyCurrentUserToShell === "function") {
+      window.MSDachAuth.applyCurrentUserToShell();
+    }
+  }
+
+
+  function getConfiguredApiBase() {
+    try {
+      const runtimeBase = String(window.__API_BASE__ || "").trim().replace(/\/+$/, "");
+      if (runtimeBase) return runtimeBase;
+    } catch {}
+
+    try {
+      const storageBase = String(localStorage.getItem("msdach-api-base") || "").trim().replace(/\/+$/, "");
+      if (storageBase) return storageBase;
+    } catch {}
+
+    try {
+      const hostname = location.hostname || "";
+      const isLocal = /^(localhost|127\.0\.0\.1)$/i.test(hostname);
+      if (location.protocol === "file:" || (isLocal && location.port !== "3001")) {
+        return LOCAL_DEV_API_ORIGIN;
+      }
+    } catch {}
+
+    return "";
+  }
+
+  function resolveApiUrl(path) {
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = getConfiguredApiBase();
+    return base ? `${base}${path.startsWith("/") ? path : `/${path}`}` : path;
+  }
+  async function parseApiJson(response) {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.status === "error") {
+      throw new Error(data.message || `HTTP ${response.status}`);
+    }
+    return data;
+  }
+
+  async function fetchUsersFromAPI() {
+    const response = await fetch(resolveApiUrl("/api/auth_users"), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const data = await parseApiJson(response);
+    return (data.users || data.data || []).map(normalizeUser);
+  }
+
+  async function createUserOnAPI(payload) {
+    const response = await fetch(resolveApiUrl("/api/auth_users"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseApiJson(response);
+    return normalizeUser(data.user || data.data);
+  }
+
+  async function updateUserOnAPI(id, payload) {
+    const response = await fetch(resolveApiUrl("/api/auth_users"), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ id, ...payload }),
+    });
+    const data = await parseApiJson(response);
+    return normalizeUser(data.user || data.data);
+  }
+
+  async function deleteUserOnAPI(id) {
+    const response = await fetch(`${resolveApiUrl("/api/auth_users")}?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    await parseApiJson(response);
+  }
+
+  async function refreshUsersFromAPI() {
+    try {
+      const apiUsers = await fetchUsersFromAPI();
+      if (apiUsers.length) {
+        users = apiUsers;
+        nextId = Math.max(0, ...users.map((u) => Number(u.id) || 0)) + 1;
+        saveUsers();
+        renderUsers();
+      }
+    } catch (error) {
+      console.warn("Auth users API fetch failed, using local users:", error?.message || error);
+    }
   }
 
   function getUserDisplayName(user) {
@@ -54,7 +146,7 @@ const einstellungPage = (function () {
   }
 
   function getDelegationTargetOptions(userId) {
-    const currentUser = users.find((u) => u.id === userId);
+    const currentUser = users.find((u) => String(u.id) === String(userId));
     const currentName = getUserAssigneeName(currentUser);
     const dynamicNames = users
       .filter((u) => u.id !== userId && u.active !== false)
@@ -193,8 +285,7 @@ const einstellungPage = (function () {
             <label>Rolle*</label>
             <select id="es-rolle">
               <option value="" disabled selected>Wählen Sie eine Rolle</option>
-              <option value="admin">admin</option>
-              <option value="user">user</option>
+              ${ROLE_OPTIONS.map((role) => `<option value="${role}">${role}</option>`).join("")}
             </select>
           </div>
         </div>
@@ -316,6 +407,7 @@ const einstellungPage = (function () {
     users.forEach((u) => {
       const displayName = getUserDisplayName(u);
       const assigneeName = getUserAssigneeName(u);
+      const userId = esc(String(u.id));
       html += `
         <div class="es-user-card ${u.active === false ? "inactive" : ""}">
           <div class="es-user-info">
@@ -327,18 +419,18 @@ const einstellungPage = (function () {
             <div class="es-status-wrap">
               <span class="es-status-text ${u.active === false ? "inactive" : ""}">${u.active === false ? "Inaktiv" : "Aktiv"}</span>
               <label class="es-toggle" title="Benutzer aktiv/inaktiv">
-                <input type="checkbox" ${u.active !== false ? "checked" : ""} ${u.active === false ? "disabled" : ""} onchange="window.esToggleUserStatus(${u.id}, this)">
+                <input type="checkbox" ${u.active !== false ? "checked" : ""} ${u.active === false ? "disabled" : ""} onchange="window.esToggleUserStatus('${userId}', this)">
                 <span class="es-toggle-slider"></span>
               </label>
             </div>
             <span class="es-role-badge ${u.rolle === "admin" ? "admin" : ""}">${esc(u.rolle)}</span>
-            <button class="es-icon-btn es-edit-btn" onclick="window.esEditUser(${u.id})" title="Bearbeiten">
+            <button class="es-icon-btn es-edit-btn" onclick="window.esEditUser('${userId}')" title="Bearbeiten">
               <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
               </svg>
             </button>
-            <button class="es-icon-btn es-delete-btn" onclick="window.esDeleteUser(${u.id})" title="Löschen">
+            <button class="es-icon-btn es-delete-btn" onclick="window.esDeleteUser('${userId}')" title="Löschen">
               <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                 <polyline points="3 6 5 6 21 6"/>
                 <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
@@ -360,7 +452,7 @@ const einstellungPage = (function () {
     const submitBtn = document.getElementById("es-submit-btn");
 
     if (mode === "edit") {
-      const u = users.find((x) => x.id === userId);
+      const u = users.find((x) => String(x.id) === String(userId));
       if (!u) return;
       titleEl2.textContent = "Benutzer bearbeiten";
       submitBtn.textContent = "Änderungen speichern";
@@ -396,7 +488,7 @@ const einstellungPage = (function () {
     const select = document.getElementById("es-deactivate-delegate");
     if (!select) return;
 
-    const user = users.find((u) => u.id === userId);
+    const user = users.find((u) => String(u.id) === String(userId));
     const options = getDelegationTargetOptions(userId);
     select.innerHTML = `<option value="">Bitte Benutzer wählen</option>${options.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("")}`;
     if (user?.delegatedTo && options.includes(user.delegatedTo)) {
@@ -422,7 +514,7 @@ const einstellungPage = (function () {
   }
 
   async function confirmDeactivateUser() {
-    const user = users.find((u) => u.id === pendingDeactivateUserId);
+    const user = users.find((u) => String(u.id) === String(pendingDeactivateUserId));
     const selectedDelegate = String(document.getElementById("es-deactivate-delegate")?.value || "").trim();
     const confirmBtn = document.getElementById("es-deactivate-confirm");
     if (!user || !selectedDelegate) {
@@ -437,6 +529,11 @@ const einstellungPage = (function () {
       }
 
       await updateDelegierenOnAPI(getUserAssigneeName(user), selectedDelegate);
+      try {
+        await updateUserOnAPI(user.id, { ...user, active: false, delegatedTo: selectedDelegate });
+      } catch (apiError) {
+        console.warn("Auth user deactivate API failed, saving locally:", apiError?.message || apiError);
+      }
 
       user.active = false;
       user.delegatedTo = selectedDelegate;
@@ -486,54 +583,101 @@ const einstellungPage = (function () {
     return ok ? { vn, nn, em, pw, rl } : null;
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const data = validateForm();
     if (!data) return;
+    const submitBtn = document.getElementById("es-submit-btn");
+    const originalText = submitBtn?.textContent || "Benutzer erstellen";
 
-    if (editingId) {
-      const idx = users.findIndex((u) => u.id === editingId);
-      if (idx !== -1) {
-        users[idx] = {
-          ...users[idx],
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Wird gespeichert...";
+    }
+
+    try {
+      if (editingId) {
+        let savedUser = null;
+        try {
+          savedUser = await updateUserOnAPI(editingId, {
+            vorname: data.vn,
+            nachname: data.nn,
+            email: data.em,
+            rolle: data.rl,
+            ...(data.pw ? { passwort: data.pw } : {}),
+          });
+        } catch (apiError) {
+          console.warn("Auth user update API failed, saving locally:", apiError?.message || apiError);
+        }
+
+        const idx = users.findIndex((u) => String(u.id) === String(editingId));
+        if (idx !== -1) {
+          users[idx] = savedUser || {
+            ...users[idx],
+            vorname: data.vn,
+            nachname: data.nn,
+            email: data.em,
+            rolle: data.rl,
+            ...(data.pw ? { passwort: data.pw } : {}),
+          };
+        }
+      } else {
+        let savedUser = null;
+        try {
+          savedUser = await createUserOnAPI({
+            vorname: data.vn,
+            nachname: data.nn,
+            email: data.em,
+            passwort: data.pw,
+            rolle: data.rl,
+          });
+        } catch (apiError) {
+          alert(apiError?.message || "Signup API fehlgeschlagen.");
+          return;
+        }
+
+        users.push(savedUser || {
+          id: nextId++,
           vorname: data.vn,
           nachname: data.nn,
           email: data.em,
+          passwort: data.pw,
           rolle: data.rl,
-          ...(data.pw ? { passwort: data.pw } : {}),
-        };
+          active: true,
+          delegatedTo: "",
+        });
       }
-    } else {
-      users.push({
-        id: nextId++,
-        vorname: data.vn,
-        nachname: data.nn,
-        email: data.em,
-        passwort: data.pw,
-        rolle: data.rl,
-        active: true,
-        delegatedTo: "",
-      });
-    }
 
-    saveUsers();
-    closeModal();
-    renderUsers();
+      saveUsers();
+      closeModal();
+      renderUsers();
+      refreshUsersFromAPI();
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+      }
+    }
   }
 
   window.esEditUser = (id) => openModal("edit", id);
 
-  window.esDeleteUser = (id) => {
-    const u = users.find((x) => x.id === id);
+  window.esDeleteUser = async (id) => {
+    const u = users.find((x) => String(x.id) === String(id));
     if (!u) return;
     if (confirm(`Benutzer „${getUserDisplayName(u)}” wirklich löschen?`)) {
-      users = users.filter((x) => x.id !== id);
+      try {
+        await deleteUserOnAPI(id);
+      } catch (apiError) {
+        console.warn("Auth user delete API failed, deleting locally:", apiError?.message || apiError);
+      }
+      users = users.filter((x) => String(x.id) !== String(id));
       saveUsers();
       renderUsers();
     }
   };
 
   window.esToggleUserStatus = (id, checkboxEl) => {
-    const user = users.find((u) => u.id === id);
+    const user = users.find((u) => String(u.id) === String(id));
     if (!user) return;
     if (user.active === false) {
       if (checkboxEl) checkboxEl.checked = false;
@@ -542,6 +686,9 @@ const einstellungPage = (function () {
     const isActive = !!checkboxEl?.checked;
 
     if (isActive) {
+      updateUserOnAPI(id, { ...user, active: true, delegatedTo: "" }).catch((apiError) => {
+        console.warn("Auth user activate API failed, saving locally:", apiError?.message || apiError);
+      });
       user.active = true;
       user.delegatedTo = "";
       saveUsers();
@@ -576,6 +723,7 @@ const einstellungPage = (function () {
     if (!contentArea) return;
     contentArea.innerHTML = getHTML();
     renderUsers();
+    refreshUsersFromAPI();
 
     document.getElementById("es-open-create")?.addEventListener("click", () => openModal("create"));
     document.getElementById("es-modal-close")?.addEventListener("click", closeModal);
@@ -607,3 +755,4 @@ const einstellungPage = (function () {
 window.einstellungPage = einstellungPage;
 window.settingsPage = window.einstellungPage;
 console.log("einstellung.js loaded - window.einstellungPage exists:", !!window.einstellungPage);
+
