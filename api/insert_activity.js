@@ -55,6 +55,13 @@ export default async function handler(req, res) {
     );
   }
 
+  function optionalBoolean(value) {
+    if (value === true || value === false) return value;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return undefined;
+  }
+
   async function leadExists(leadId) {
     const lookupUrl =
       `https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads?select=id&id=eq.${encodeURIComponent(leadId)}&limit=1`;
@@ -138,6 +145,17 @@ export default async function handler(req, res) {
     }
 
     const nextId = await fetchNextActivityId();
+    const activityType = String(body.activity_type || body.action || '').trim();
+    const email = String(body.email || body.current_email || '').trim();
+    const activityDate = String(body.activity_date || '').trim();
+    const activityTime = String(body.activity_time || '').trim();
+    const callConnected = optionalBoolean(body.call_connected);
+    const isTouchpoint = optionalBoolean(body.is_touchpoint);
+    const isFollowup = optionalBoolean(body.is_followup);
+    const callDurationMinutes =
+      body.call_duration_minutes === undefined || body.call_duration_minutes === null
+        ? undefined
+        : Number(body.call_duration_minutes);
 
     const payloadVariants = [
       compactPayload({
@@ -145,6 +163,29 @@ export default async function handler(req, res) {
         lead_id: leadId,
         description,
         created_by: actor,
+        from: actor,
+        user: actor,
+        activity_type: activityType,
+        activity_text: body.activity_text || description,
+        action: activityType,
+        email,
+        lead_name: body.lead_name,
+        activity_date: activityDate,
+        activity_time: activityTime,
+        call_connected: callConnected,
+        call_duration_minutes: Number.isFinite(callDurationMinutes) ? callDurationMinutes : undefined,
+        is_touchpoint: isTouchpoint,
+        is_followup: isFollowup,
+      }),
+      compactPayload({
+        id: nextId,
+        lead_id: leadId,
+        description,
+        created_by: actor,
+        activity_type: activityType,
+        activity_date: activityDate,
+        activity_time: activityTime,
+        email,
       }),
       compactPayload({
         id: nextId,

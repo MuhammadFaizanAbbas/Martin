@@ -786,12 +786,24 @@ const ACTIVITY_LOG_API = "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/Aktiv
     return normalizedErstberatung;
   }
 
+function getLocalActivityDateTime(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return {
+    activity_date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    activity_time: `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  };
+}
+
 async function insertActivity(leadId, activityType, activityText, meta = {}) {
   const actor = resolveActivityActorForLead(
     leadId,
     meta.bearbeiter || meta.from || meta.user || meta.author,
   );
   const normalizedText = rewriteActivityTextActor(activityText, actor);
+  const isEmailActivity = String(activityType || "").toLowerCase() === "email";
+  const activityDateTime = isEmailActivity || meta.activityDate || meta.activityTime
+    ? getLocalActivityDateTime()
+    : {};
 
   const payload = {
     lead_id: String(leadId),
@@ -805,6 +817,12 @@ async function insertActivity(leadId, activityType, activityText, meta = {}) {
     phone: meta.phone || "",
     email: meta.email || "",
     lead_name: meta.leadName || "",
+    activity_date: meta.activityDate || (isEmailActivity ? activityDateTime.activity_date : undefined),
+    activity_time: meta.activityTime || (isEmailActivity ? activityDateTime.activity_time : undefined),
+    call_connected: meta.callConnected,
+    call_duration_minutes: meta.callDurationMinutes,
+    is_touchpoint: meta.isTouchpoint,
+    is_followup: meta.isFollowup,
     timestamp: new Date().toISOString(),
   };
 
@@ -2220,6 +2238,10 @@ async function triggerBulkEmailWebhook({ emails, names, action, source }) {
               from: actor,
               email: item.email,
               leadName: item.name,
+              callConnected: false,
+              callDurationMinutes: 0,
+              isTouchpoint: true,
+              isFollowup: false,
             });
           }),
         );
@@ -3262,6 +3284,10 @@ const payload = {
         from: actor,
         email,
         leadName: lead.name,
+        callConnected: false,
+        callDurationMinutes: 0,
+        isTouchpoint: true,
+        isFollowup: false,
       });
     } catch (err) {
       console.warn("Failed to record email activity:", err?.message || err);
@@ -3862,7 +3888,7 @@ function saveStatusUpdate() {
       .timeline-author { font-weight: 500; }
       .timeline-date { color: #94a3b8; }
       .activity-timeline-wrap { max-height: none; overflow: visible; }
-      .activity-card { background: #f8fbff; border: 1px solid #d8e2ef; border-radius: 18px; overflow: hidden; box-shadow: none; margin-bottom: 16px; }
+      .activity-card { background: #f8fbff; border: 1px solid #d8e2ef; border-radius: 18px; box-shadow: none; margin-bottom: 16px; }
       .activity-card:last-child { margin-bottom: 0; }
       .activity-row { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 28px; align-items: center; padding: 18px 28px; border-bottom: 1px solid #e6edf5; }
       .activity-row:last-child { border-bottom: none; }

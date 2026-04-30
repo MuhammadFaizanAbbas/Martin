@@ -615,11 +615,12 @@
       #viewModal .modal-content, #notesModal .modal-content, #massEmailModal .modal-content { background: white; border-radius: 24px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; animation: modalFadeIn 0.2s ease; }
       @keyframes modalFadeIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
       .modal-large { width: 90%; max-width: 800px; }
-      .modal-medium { width: 90%; max-width: 500px; }
+      #viewModal .modal-large { width: min(96vw, 1120px); max-width: 625px; max-height: 92vh; }
       .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
       .modal-header h3 { font-size: 1.3rem; font-weight: 600; margin: 0; }
       .close-modal { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #94a3b8; }
       .modal-body { flex: 1; overflow-y: auto; padding: 24px; }
+      #viewModal .modal-body { min-height: 0; }
       .view-tabs { display: flex; gap: 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 20px; flex-wrap: wrap; }
       .view-tab { background: none; border: none; padding: 10px 20px; font-size: 0.85rem; font-weight: 500; color: #64748b; cursor: pointer; border-radius: 8px 8px 0 0; transition: all 0.2s; }
       .view-tab:hover { background: #f1f5f9; color: #1e293b; }
@@ -691,6 +692,7 @@
         .expand-grid { grid-template-columns: repeat(2, 1fr); }
         .form-row { grid-template-columns: 1fr; }
         .modal-content { width: 95%; max-height: 90vh; }
+        #viewModal .modal-large { width: 96%; max-height: 92vh; }
         .view-detail-row { flex-direction: column; }
         .view-detail-label { width: 100%; margin-bottom: 4px; }
         .pagination-container { flex-direction: column; align-items: center; }
@@ -703,14 +705,20 @@
       }
 
       /* Activity timeline */
-      #viewTabActivity { padding-top: 6px; }
-      .activity-wrap { max-height: 380px; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
-      .activity-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px; }
-      .activity-text { color: #334155; font-size: 0.92rem; line-height: 1.5; }
-      .activity-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 0.82rem; color: #94a3b8; }
-      .activity-by { color: #64748b; }
+      #viewTabActivity { padding-top: 6px; min-height: 0; }
+      #viewTabActivity.active { display: block; }
+      .activity-wrap { max-height: none; overflow: visible; display: flex; flex-direction: column; gap: 12px; padding: 0 4px 8px 0; }
+      .activity-card { background: #ffffff; border: 1px solid #dbe5f1; border-radius: 14px; padding: 16px 18px; overflow: visible; overflow-wrap: anywhere; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04); }
+      .activity-text { color: #334155; font-size: 0.94rem; line-height: 1.65; white-space: pre-line; }
+      .activity-meta { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #eef2f7; font-size: 0.82rem; color: #94a3b8; }
+      .activity-by { color: #64748b; min-width: 0; }
       .activity-by strong { color: #0f172a; font-weight: 600; }
-      .activity-time { color: #94a3b8; }
+      .activity-time { color: #94a3b8; white-space: nowrap; }
+      @media (max-width: 640px) {
+        .activity-card { padding: 14px; }
+        .activity-meta { align-items: flex-start; flex-direction: column; gap: 6px; }
+        .activity-time { white-space: normal; }
+      }
     `;
     document.head.appendChild(styles);
   };
@@ -915,8 +923,20 @@
       .join("\n");
   }
 
+  function getLocalActivityDateTime(date = new Date()) {
+    const pad = (value) => String(value).padStart(2, "0");
+    return {
+      activity_date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+      activity_time: `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+    };
+  }
+
   async function insertActivity(leadId, activityType, activityText, meta = {}) {
     const actor = resolveActivityActor(meta.from || meta.user || meta.author);
+    const isEmailActivity = String(activityType || "").toLowerCase() === "email";
+    const activityDateTime = isEmailActivity || meta.activityDate || meta.activityTime
+      ? getLocalActivityDateTime()
+      : {};
     const payload = {
       lead_id: leadId,
       from: actor,
@@ -929,6 +949,12 @@
       phone: meta.phone || "",
       email: meta.email || "",
       lead_name: meta.leadName || "",
+      activity_date: meta.activityDate || (isEmailActivity ? activityDateTime.activity_date : undefined),
+      activity_time: meta.activityTime || (isEmailActivity ? activityDateTime.activity_time : undefined),
+      call_connected: meta.callConnected,
+      call_duration_minutes: meta.callDurationMinutes,
+      is_touchpoint: meta.isTouchpoint,
+      is_followup: meta.isFollowup,
       timestamp: new Date().toISOString(),
     };
 
@@ -1970,6 +1996,10 @@ async function updateLeadOnAPI(id, payload) {
         const t = a.activity_time || a.activityTime || a.time;
         if (d || t) at = `${d || ""}${d && t ? " " : ""}${t || ""}`.trim();
       }
+      if (!at && text) {
+        const timestampMatch = String(text).match(/Zeitpunkt:\s*([^\n]+)/i);
+        if (timestampMatch?.[1]) at = timestampMatch[1].trim();
+      }
       const normalizedText = String(text || "")
         .replace(/^system\b/i, actor)
         .replace(/^the system\b/i, actor)
@@ -2418,6 +2448,10 @@ async function updateLeadOnAPI(id, payload) {
             from: actor,
             email: item.email,
             leadName: item.name,
+            callConnected: false,
+            callDurationMinutes: 0,
+            isTouchpoint: true,
+            isFollowup: false,
           });
         }),
       );
@@ -2723,7 +2757,7 @@ async function updateLeadOnAPI(id, payload) {
             <div class="activity-text">${escapeHtml(a.text || "")}</div>
             <div class="activity-meta">
               <div class="activity-by">Erstellt von: <strong>${escapeHtml(a.by || "System")}</strong></div>
-              <div class="activity-time">${escapeHtml(a.at || "—")}</div>
+              ${a.at ? `<div class="activity-time">${escapeHtml(a.at)}</div>` : ""}
             </div>
           </div>
         `,
@@ -2892,6 +2926,10 @@ async function updateLeadOnAPI(id, payload) {
         from: actor,
         email,
         leadName,
+        callConnected: false,
+        callDurationMinutes: 0,
+        isTouchpoint: true,
+        isFollowup: false,
       });
     } catch (e) {
       console.warn(
