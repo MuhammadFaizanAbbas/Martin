@@ -1,3 +1,5 @@
+import { getServiceRole } from '../lib/env.js';
+
 export default async function handler(req, res) {
   // Basic CORS + preflight (harmless even on same-origin)
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -11,10 +13,7 @@ export default async function handler(req, res) {
   }
 
   const target = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads';
-  const serviceRole =
-    process.env.SERVICE_ROLE ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE;
+  const serviceRole = getServiceRole();
   const allowedColumns = new Set([
     'id',
     'name',

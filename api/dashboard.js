@@ -1,9 +1,8 @@
+import { getServiceRole } from '../lib/env.js';
+
 export default async function handler(req, res) {
   const target = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads?select=status,summe_netto&order=id.asc';
-  const serviceRole =
-    process.env.SERVICE_ROLE ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE;
+  const serviceRole = getServiceRole();
   const pageSize = 1000;
 
   res.setHeader('Access-Control-Allow-Origin', '*');

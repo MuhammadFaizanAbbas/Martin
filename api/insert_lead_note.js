@@ -1,3 +1,5 @@
+import { getServiceRole } from '../lib/env.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -22,10 +24,7 @@ export default async function handler(req, res) {
   }
 
   const target = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads_notizen';
-  const serviceRole =
-    process.env.SERVICE_ROLE ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE;
+  const serviceRole = getServiceRole();
 
   if (!serviceRole) {
     return res.status(500).json({ status: 'error', message: 'Missing SERVICE_ROLE or SUPABASE_SERVICE_ROLE_KEY env var' });

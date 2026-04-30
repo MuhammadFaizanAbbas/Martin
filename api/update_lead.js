@@ -1,3 +1,5 @@
+import { getServiceRole } from '../lib/env.js';
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, PUT, PATCH, OPTIONS");
@@ -13,10 +15,7 @@ export default async function handler(req, res) {
 
   const targetBase =
     "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/leads";
-  const serviceRole =
-    process.env.SERVICE_ROLE ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE;
+  const serviceRole = getServiceRole();
   const allowedColumns = new Set([
     "name",
     "erstberatung_telefon",
