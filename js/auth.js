@@ -148,7 +148,7 @@ const MSDachAuth = (function () {
   }
 
   async function loginViaApi(email, password) {
-    const response = await fetch(resolveApiUrl("/api/auth_login"), {
+    const response = await fetch(`${resolveApiUrl("/api/auth_users")}?action=login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

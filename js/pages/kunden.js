@@ -11,7 +11,7 @@ const kundenPage = (function () {
   
 
   // ── API URLs ──────────────────────────────────────────────────────────────
-  const SO_LEADS = "/api/all_leads";
+  const SO_LEADS = "/api/leads";
   const SO_DASHBOARD = "/api/dashboard";
   const ACTIVITY_FETCH_SAME = "/api/lead_activity";
   const NOTES_FETCH_SAME = "/api/lead_notes";
@@ -709,6 +709,23 @@ const ACTIVITY_LOG_API = "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/Aktiv
     return normalized;
   }
 
+  function isMissingDisplayValue(value) {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    return (
+      !normalized ||
+      normalized === "null" ||
+      normalized === "nan" ||
+      normalized === "undefined" ||
+      normalized === "-" ||
+      normalized === "—"
+    );
+  }
+
+  function toDisplayValue(value, fallback = "—") {
+    if (typeof value === "number" && Number.isNaN(value)) return fallback;
+    return isMissingDisplayValue(value) ? fallback : String(value).trim();
+  }
+
   function getLeadIdentityKey(lead) {
     const id = String(lead?.id ?? "").trim();
     if (id) return `id|${id}`;
@@ -1273,13 +1290,13 @@ async function fetchActivityForLead(leadId) {
           : (cached.data || cached.leads || cached.items || []);
         const mappedCachedLeads = applyPendingUpdates((rawCachedList || []).map((apiLead) => ({
           id: apiLead.id,
-          name: apiLead.name || "â€”",
+      name: toDisplayValue(apiLead.name),
           salutation: apiLead.salutation || "",
-          ort: apiLead.ort || "â€”",
+      ort: toDisplayValue(apiLead.ort),
           status: normalizeLeadStatus(apiLead.status),
           statusClass: getStatusClass(normalizeLeadStatus(apiLead.status)),
-          quelle: apiLead.lead_quelle || "â€”",
-          bearbeiter: apiLead.bearbeiter || "â€”",
+      quelle: toDisplayValue(apiLead.lead_quelle),
+      bearbeiter: toDisplayValue(apiLead.bearbeiter),
           summe: apiLead.summe_netto ? `$ ${formatNumber(apiLead.summe_netto)}` : "$ 0,00",
           datum: apiLead.created_at ? apiLead.created_at.split(" ")[0] : apiLead.datum || "â€”",
           dachflaeche: apiLead.dachflaeche_m2 || "",
@@ -1330,25 +1347,25 @@ async function fetchActivityForLead(leadId) {
       datum: apiLead.created_at
         ? apiLead.created_at.split(" ")[0]
         : apiLead.datum || "—",
-      dachflaeche: apiLead.dachflaeche_m2 || "",
-      dacheindeckung: apiLead.dacheindeckung || "",
-      dachalter: apiLead.baujahr_dach || "",
-      dachpfanne: apiLead.dachpfanne || "",
-      farbe: apiLead.wunsch_farbe || "",
+      dachflaeche: toDisplayValue(apiLead.dachflaeche_m2, ""),
+      dacheindeckung: toDisplayValue(apiLead.dacheindeckung, ""),
+      dachalter: toDisplayValue(apiLead.baujahr_dach, ""),
+      dachpfanne: toDisplayValue(apiLead.dachpfanne, ""),
+      farbe: toDisplayValue(apiLead.wunsch_farbe, ""),
       dachneigung: apiLead.dachneigung_grad
         ? `${apiLead.dachneigung_grad}°`
         : "",
-      strasse: apiLead.strasse_objekt || "",
-      telefon: apiLead.telefon || "",
-      email: apiLead.email || "",
-      nachfassen: apiLead.nachfassen,
+      strasse: toDisplayValue(apiLead.strasse_objekt, ""),
+      telefon: toDisplayValue(apiLead.telefon, ""),
+      email: toDisplayValue(apiLead.email, ""),
+      nachfassen: toDisplayValue(apiLead.nachfassen, ""),
       erstberatung_telefon: normalizeErstberatungValue(apiLead.erstberatung_telefon || ""),
       delegieren: resolveLeadDelegation(apiLead.bearbeiter || "—", apiLead.delegieren),
-      plz: apiLead.plz || "",
-      angebot: apiLead.angebot || "",
-      qualification: apiLead.einschaetzung_kunde || "",
-      kontaktVia: apiLead.kontakt_via || "",
-      salesTyp: apiLead.sale_typ || "",
+      plz: toDisplayValue(apiLead.plz, ""),
+      angebot: toDisplayValue(apiLead.angebot, ""),
+      qualification: toDisplayValue(apiLead.einschaetzung_kunde, ""),
+      kontaktVia: toDisplayValue(apiLead.kontakt_via, ""),
+      salesTyp: toDisplayValue(apiLead.sale_typ, ""),
       notes: [],
       activities: [],
     })));
@@ -2100,7 +2117,7 @@ async function triggerBulkEmailWebhook({ emails, names, action, source }) {
             </div>
             <div class="mass-email-recipient-row">
               <span class="mass-email-recipient-label">Email</span>
-              <span class="mass-email-recipient-value">${escapeHtml(lead.email || "—")}</span>
+              <span class="mass-email-recipient-value">${escapeHtml(toDisplayValue(lead.email))}</span>
             </div>
           </div>
         `;
@@ -2773,7 +2790,7 @@ function showBeauftragungConfirmation(leadId, newStatus, previousStatus, saveCal
                 </div>
                 <div class="form-group">
                   <label>Ort</label>
-                  <input type="text" id="edit_ort" class="k-full-input" value="${escapeHtml(lead.ort)}">
+                  <input type="text" id="edit_ort" class="k-full-input" value="${escapeHtml(toDisplayValue(lead.ort))}">
                 </div>
                 <div class="form-group">
                   <label>Telefon</label>
@@ -3144,36 +3161,36 @@ const payload = {
     contentEl.innerHTML = `
       <div class="k-view-section">
         <h4>Kontaktinformationen</h4>
-        <div class="k-detail-row"><div class="k-detail-label">Anrede</div><div class="k-detail-value">${escapeHtml(lead.salutation || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Name</div><div class="k-detail-value">${escapeHtml(lead.name)}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Ort</div><div class="k-detail-value">${escapeHtml(lead.ort)}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Straße</div><div class="k-detail-value">${escapeHtml(lead.strasse || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">PLZ</div><div class="k-detail-value">${escapeHtml(lead.plz || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Telefon</div><div class="k-detail-value">${escapeHtml(lead.telefon || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">E-Mail</div><div class="k-detail-value">${escapeHtml(lead.email || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Kontakt Via</div><div class="k-detail-value">${escapeHtml(lead.kontaktVia || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Anrede</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.salutation))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Name</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.name))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Ort</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.ort))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Straße</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.strasse))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">PLZ</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.plz))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Telefon</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.telefon))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">E-Mail</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.email))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Kontakt Via</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.kontaktVia))}</div></div>
       </div>
       <div class="k-view-section">
         <h4>Lead Informationen</h4>
-        <div class="k-detail-row"><div class="k-detail-label">Status</div><div class="k-detail-value"><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Lead Quelle</div><div class="k-detail-value">${escapeHtml(lead.quelle || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Bearbeiter</div><div class="k-detail-value">${escapeHtml(lead.bearbeiter || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Delegieren</div><div class="k-detail-value">${escapeHtml(lead.delegieren || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Erstberatung Telefon</div><div class="k-detail-value">${escapeHtml(lead.erstberatung_telefon || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Angebot</div><div class="k-detail-value">${escapeHtml(lead.angebot || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Summe Netto</div><div class="k-detail-value">${escapeHtml(lead.summe)}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Datum</div><div class="k-detail-value">${escapeHtml(lead.datum)}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Nachfassen</div><div class="k-detail-value">${escapeHtml(lead.nachfassen || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Sales Typ</div><div class="k-detail-value">${escapeHtml(lead.salesTyp || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Status</div><div class="k-detail-value"><span class="badge ${lead.statusClass}">${escapeHtml(toDisplayValue(lead.status))}</span></div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Lead Quelle</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.quelle))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Bearbeiter</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.bearbeiter))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Delegieren</div><div class="k-detail-value">${escapeHtml(displayDelegieren)}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Erstberatung Telefon</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.erstberatung_telefon))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Angebot</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.angebot))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Summe Netto</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.summe))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Datum</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.datum))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Nachfassen</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.nachfassen))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Sales Typ</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.salesTyp))}</div></div>
       </div>
       <div class="k-view-section">
         <h4>Dachdetails</h4>
-        <div class="k-detail-row"><div class="k-detail-label">Dachfläche (m²)</div><div class="k-detail-value">${escapeHtml(lead.dachflaeche || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Dacheindeckung</div><div class="k-detail-value">${escapeHtml(lead.dacheindeckung || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Baujahr Dach</div><div class="k-detail-value">${escapeHtml(lead.dachalter || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Dachpfanne</div><div class="k-detail-value">${escapeHtml(lead.dachpfanne || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Wunsch Farbe</div><div class="k-detail-value">${escapeHtml(lead.farbe || "—")}</div></div>
-        <div class="k-detail-row"><div class="k-detail-label">Dachneigung Grad</div><div class="k-detail-value">${escapeHtml(lead.dachneigung || "—")}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Dachfläche (m²)</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.dachflaeche))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Dacheindeckung</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.dacheindeckung))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Baujahr Dach</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.dachalter))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Dachpfanne</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.dachpfanne))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Wunsch Farbe</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.farbe))}</div></div>
+        <div class="k-detail-row"><div class="k-detail-label">Dachneigung Grad</div><div class="k-detail-value">${escapeHtml(toDisplayValue(lead.dachneigung))}</div></div>
       </div>
       
       <div class="k-view-section">
@@ -3410,8 +3427,16 @@ const payload = {
     filteredData.forEach((lead) => {
       const isExp = expandedRows.has(lead.id);
       const editCb = checkedEdit.has(String(lead.id)) || isErstberatungChecked(lead);
-      const displayName =
-        (lead.salutation ? lead.salutation + " " : "") + lead.name;
+      const displayName = toDisplayValue(
+        `${lead.salutation ? lead.salutation + " " : ""}${lead.name || ""}`.trim()
+      );
+      const displayOrt = toDisplayValue(lead.ort);
+      const displayStatus = toDisplayValue(lead.status);
+      const displayQuelle = toDisplayValue(lead.quelle);
+      const displayBearbeiter = toDisplayValue(lead.bearbeiter);
+      const displayDelegieren = toDisplayValue(lead.delegieren);
+      const displaySumme = toDisplayValue(lead.summe);
+      const displayDatum = toDisplayValue(lead.datum);
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
@@ -3425,14 +3450,14 @@ const payload = {
           </button>
           </td>
           <td><span style="font-weight:500">${escapeHtml(displayName)}</span></td>
-        <td style="font-size:0.8rem;color:#64748b">${escapeHtml(lead.ort)}</td>
-          <td><span class="badge ${lead.statusClass}">${escapeHtml(lead.status)}</span></td>
-          <td>${lead.quelle ? `<span class="tag">${escapeHtml(lead.quelle)}</span>` : ""}</td>
-          <td>${lead.bearbeiter ? `<span class="assignee-chip">${escapeHtml(lead.bearbeiter)}</span>` : ""}</td>
+        <td style="font-size:0.8rem;color:#64748b">${escapeHtml(displayOrt)}</td>
+          <td><span class="badge ${lead.statusClass}">${escapeHtml(displayStatus)}</span></td>
+          <td><span class="tag">${escapeHtml(displayQuelle)}</span></td>
+          <td><span class="assignee-chip">${escapeHtml(displayBearbeiter)}</span></td>
 
-          <td><div class="delegate-dot">${escapeHtml(lead.delegieren || "—")}</div></td>
-          <td><span class="amount">${escapeHtml(lead.summe)}</span></td>
-          <td><span class="date-cell">${escapeHtml(lead.datum)}</span></td>
+          <td><div class="delegate-dot">${escapeHtml(displayDelegieren)}</div></td>
+          <td><span class="amount">${escapeHtml(displaySumme)}</span></td>
+          <td><span class="date-cell">${escapeHtml(displayDatum)}</span></td>
           <td>
           <button class="act-btn" onclick="window.viewKunde(${lead.id})" title="Details anzeigen">
             <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -3496,16 +3521,16 @@ const payload = {
       xtr.style.cursor = 'pointer';
       xtr.title = 'Klicken Sie zum Bearbeiten der Lead-Daten';
       xtr.innerHTML = `<td colspan="14"><div class="expand-grid">
-        <div class="expand-item"><label>Dachfläche (m²)</label><span>${escapeHtml(lead.dachflaeche || "—")}</span></div>
-        <div class="expand-item"><label>Dacheindeckung</label><span>${escapeHtml(lead.dacheindeckung || "—")}</span></div>
-        <div class="expand-item"><label>Baujahr Dach</label><span>${escapeHtml(lead.dachalter || "—")}</span></div>
-        <div class="expand-item"><label>Dachpfanne</label><span>${escapeHtml(lead.dachpfanne || "—")}</span></div>
-        <div class="expand-item"><label>Wunsch Farbe</label><span>${escapeHtml(lead.farbe || "—")}</span></div>
-        <div class="expand-item"><label>Dachneigung Grad</label><span>${escapeHtml(lead.dachneigung || "—")}</span></div>
-        <div class="expand-item"><label>Straße</label><span>${escapeHtml(lead.strasse || "—")}</span></div>
-        <div class="expand-item"><label>PLZ</label><span>${escapeHtml(lead.plz || "—")}</span></div>
-        <div class="expand-item"><label>Telefon</label><span>${escapeHtml(lead.telefon || "—")}</span></div>
-        <div class="expand-item"><label>E-Mail</label><span>${escapeHtml(lead.email || "—")}</span></div>
+        <div class="expand-item"><label>Dachfläche (m²)</label><span>${escapeHtml(toDisplayValue(lead.dachflaeche))}</span></div>
+        <div class="expand-item"><label>Dacheindeckung</label><span>${escapeHtml(toDisplayValue(lead.dacheindeckung))}</span></div>
+        <div class="expand-item"><label>Baujahr Dach</label><span>${escapeHtml(toDisplayValue(lead.dachalter))}</span></div>
+        <div class="expand-item"><label>Dachpfanne</label><span>${escapeHtml(toDisplayValue(lead.dachpfanne))}</span></div>
+        <div class="expand-item"><label>Wunsch Farbe</label><span>${escapeHtml(toDisplayValue(lead.farbe))}</span></div>
+        <div class="expand-item"><label>Dachneigung Grad</label><span>${escapeHtml(toDisplayValue(lead.dachneigung))}</span></div>
+        <div class="expand-item"><label>Straße</label><span>${escapeHtml(toDisplayValue(lead.strasse))}</span></div>
+        <div class="expand-item"><label>PLZ</label><span>${escapeHtml(toDisplayValue(lead.plz))}</span></div>
+        <div class="expand-item"><label>Telefon</label><span>${escapeHtml(toDisplayValue(lead.telefon))}</span></div>
+        <div class="expand-item"><label>E-Mail</label><span>${escapeHtml(toDisplayValue(lead.email))}</span></div>
       </div>`;
       tbody.appendChild(xtr);
     });
@@ -4154,6 +4179,7 @@ function saveStatusUpdate() {
 window.kundenPage = kundenPage;
 window.customersPage = window.kundenPage;
 console.log("kunden.js loaded - window.kundenPage exists with full API integration");
+
 
 
 

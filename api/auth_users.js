@@ -1,6 +1,7 @@
 import { getEnvValue, getServiceRole } from '../lib/env.js';
 
 const SUPABASE_AUTH_BASE = 'https://bmnxecoddcxcwvqukujh.supabase.co/auth/v1';
+const MITARBEITER_BASE = 'https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/mitarbeiter';
 
 function jsonResponse(res, status, payload) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -90,6 +91,75 @@ async function signupRequest(body) {
   return payload;
 }
 
+async function loginRequest(email, password) {
+  const serviceRole = getServiceRole();
+  if (!serviceRole) {
+    const error = new Error('Missing SERVICE_ROLE or SUPABASE_SERVICE_ROLE_KEY env var');
+    error.status = 500;
+    throw error;
+  }
+
+  const response = await fetch(`${SUPABASE_AUTH_BASE}/token?grant_type=password`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRole,
+      Authorization: `Bearer ${serviceRole}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ email, password }),
+  });
+
+  const text = await response.text();
+  let payload = {};
+  try { payload = text ? JSON.parse(text) : {}; }
+  catch { payload = { raw: text }; }
+
+  if (!response.ok) {
+    const error = new Error(payload?.msg || payload?.message || payload?.error_description || `Supabase Auth HTTP ${response.status}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
+async function updateMitarbeiterStatus(email, active) {
+  const serviceRole = getServiceRole();
+  if (!serviceRole) {
+    const error = new Error('Missing SERVICE_ROLE or SUPABASE_SERVICE_ROLE_KEY env var');
+    error.status = 500;
+    throw error;
+  }
+
+  const response = await fetch(`${MITARBEITER_BASE}?email=eq.${encodeURIComponent(email)}`, {
+    method: 'PATCH',
+    headers: {
+      apikey: serviceRole,
+      Authorization: `Bearer ${serviceRole}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify({ aktiv: active }),
+  });
+
+  const text = await response.text();
+  let payload = [];
+  try { payload = text ? JSON.parse(text) : []; }
+  catch { payload = { raw: text }; }
+
+  if (!response.ok) {
+    const error = new Error(payload?.message || payload?.raw || `Supabase HTTP ${response.status}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
 async function authRequest(path, options = {}) {
   const serviceRole = getServiceRole();
   if (!serviceRole) {
@@ -145,6 +215,26 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
+      const action = String(req.query?.action || body.action || '').trim().toLowerCase();
+      if (action === 'login') {
+        const email = String(body.email || '').trim().toLowerCase();
+        const password = String(body.password || body.passwort || '');
+        if (!email || !password) {
+          return jsonResponse(res, 400, { status: 'error', message: 'Email and password are required' });
+        }
+        const payload = await loginRequest(email, password);
+        return jsonResponse(res, 200, {
+          status: 'success',
+          session: {
+            access_token: payload.access_token,
+            refresh_token: payload.refresh_token,
+            expires_in: payload.expires_in,
+            token_type: payload.token_type,
+          },
+          user: mapAuthUser(payload.user),
+        });
+      }
+
       const email = String(body.email || '').trim().toLowerCase();
       const password = String(body.password || body.passwort || '').trim();
       const metadata = buildMetadata(body);
@@ -171,6 +261,17 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PATCH') {
+      const action = String(req.query?.action || body.action || '').trim().toLowerCase();
+      if (action === 'mitarbeiter-status') {
+        const email = String(body.email || req.query?.email || '').trim().toLowerCase();
+        const active = body.aktiv ?? body.active;
+        if (!email || typeof active !== 'boolean') {
+          return jsonResponse(res, 400, { status: 'error', message: 'email and aktiv boolean are required' });
+        }
+        const payload = await updateMitarbeiterStatus(email, active);
+        return jsonResponse(res, 200, { status: 'success', data: payload });
+      }
+
       const userId = String(body.id || body.user_id || '').trim();
       if (!userId) return jsonResponse(res, 400, { status: 'error', message: 'id is required' });
 

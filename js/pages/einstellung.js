@@ -238,7 +238,7 @@ const einstellungPage = (function () {
   }
 
   async function updateMitarbeiterStatusOnAPI(email, active) {
-    const response = await fetch(resolveApiUrl("/api/update_mitarbeiter_status"), {
+    const response = await fetch(`${resolveApiUrl("/api/auth_users")}?action=mitarbeiter-status`, {
       method: "PATCH",
       headers: {
         Accept: "application/json",
