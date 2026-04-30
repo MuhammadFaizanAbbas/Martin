@@ -237,6 +237,26 @@ const einstellungPage = (function () {
     return await parseApiResponse(response);
   }
 
+  async function updateMitarbeiterStatusOnAPI(email, active) {
+    const response = await fetch(resolveApiUrl("/api/update_mitarbeiter_status"), {
+      method: "PATCH",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: String(email || "").trim(),
+        aktiv: !!active,
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.status === "error") {
+      throw new Error(data.message || `HTTP ${response.status}`);
+    }
+    return data;
+  }
+
   const getHTML = () => `
     <div class="es-container">
       <div class="es-header">
@@ -529,6 +549,7 @@ const einstellungPage = (function () {
       }
 
       await updateDelegierenOnAPI(getUserAssigneeName(user), selectedDelegate);
+      await updateMitarbeiterStatusOnAPI(user.email, false);
       try {
         await updateUserOnAPI(user.id, { ...user, active: false, delegatedTo: selectedDelegate });
       } catch (apiError) {
@@ -686,6 +707,9 @@ const einstellungPage = (function () {
     const isActive = !!checkboxEl?.checked;
 
     if (isActive) {
+      updateMitarbeiterStatusOnAPI(user.email, true).catch((apiError) => {
+        console.warn("Mitarbeiter aktiv update failed, saving locally:", apiError?.message || apiError);
+      });
       updateUserOnAPI(id, { ...user, active: true, delegatedTo: "" }).catch((apiError) => {
         console.warn("Auth user activate API failed, saving locally:", apiError?.message || apiError);
       });
