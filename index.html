@@ -30,7 +30,21 @@
       <input type="email" id="loginEmail" autocomplete="email" placeholder="Geben Sie Ihre E-Mail-Adresse ein">
 
       <label for="loginPassword">Passwort</label>
-      <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Geben Sie Ihr Passwort ein">
+      <div class="password-field">
+        <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Geben Sie Ihr Passwort ein">
+        <button type="button" class="password-toggle" id="passwordToggle" aria-label="Passwort anzeigen" aria-pressed="false">
+          <svg class="eye-icon eye-open" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <svg class="eye-icon eye-closed" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 3l18 18" />
+            <path d="M10.58 10.58A2 2 0 0 0 12 14a2 2 0 0 0 1.42-.58" />
+            <path d="M9.88 4.24A9.67 9.67 0 0 1 12 4c6.5 0 10 8 10 8a18.64 18.64 0 0 1-2.36 3.45" />
+            <path d="M6.61 6.61C3.77 8.5 2 12 2 12s3.5 8 10 8a9.73 9.73 0 0 0 4.39-1.06" />
+          </svg>
+        </button>
+      </div>
 
       <button type="submit" class="auth-primary-btn">Login</button>
     </form>
@@ -120,7 +134,10 @@
     <div class="sidebar-footer">
       <div class="user-row">
         <div class="avatar">M</div>
-        <div class="user-name">Martin Schwaak</div>
+        <div class="user-details">
+          <div class="user-name">Martin Schwaak</div>
+          <div class="user-email">admin@msdach.com</div>
+        </div>
       </div>
       <button class="logout-btn" id="logoutBtn">
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">

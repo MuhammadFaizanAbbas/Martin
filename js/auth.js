@@ -93,6 +93,63 @@ const MSDachAuth = (function () {
     el.classList.toggle("success", type === "success");
   }
 
+  function ensureToastContainer() {
+    let container = document.getElementById("toast-container");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "toast-container";
+      container.className = "toast-container";
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
+  function showToast(message, type = "success", duration = 2600) {
+    const text = String(message || "").trim();
+    if (!text) return;
+
+    const container = ensureToastContainer();
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+
+    const accent = document.createElement("span");
+    accent.className = "toast-accent";
+
+    const body = document.createElement("span");
+    body.textContent = text;
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "toast-close";
+    close.setAttribute("aria-label", "Toast schliessen");
+    close.textContent = "x";
+
+    const progress = document.createElement("div");
+    progress.className = "toast-progress";
+    const progressInner = document.createElement("div");
+    progressInner.style.transition = `transform ${duration}ms linear`;
+    progress.appendChild(progressInner);
+
+    toast.append(accent, body, close, progress);
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      progressInner.style.transform = "scaleX(0)";
+    });
+
+    const remove = () => {
+      toast.style.animation = "toastOut 180ms ease forwards";
+      window.setTimeout(() => toast.remove(), 190);
+    };
+
+    close.addEventListener("click", remove);
+    window.setTimeout(remove, duration);
+  }
+
+  function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim());
+  }
+
   function getConfiguredApiBase() {
     try {
       const runtimeBase = String(window.__API_BASE__ || "").trim().replace(/\/+$/, "");
@@ -127,6 +184,10 @@ const MSDachAuth = (function () {
 
     document.querySelectorAll(".sidebar-footer .user-name, .user-name").forEach((el) => {
       el.textContent = getDisplayName(user);
+    });
+    document.querySelectorAll(".sidebar-footer .user-email, .user-email").forEach((el) => {
+      el.textContent = user.email || "";
+      el.title = user.email || "";
     });
     document.querySelectorAll(".avatar").forEach((el) => {
       el.textContent = getInitial(user);
@@ -171,7 +232,16 @@ const MSDachAuth = (function () {
     const password = String(document.getElementById("loginPassword")?.value || "");
 
     if (!email || !password) {
-      setMessage("Bitte E-Mail und Passwort eingeben.");
+      const message = "Bitte E-Mail und Passwort eingeben.";
+      setMessage(message);
+      showToast(message, "error");
+      return;
+    }
+
+    if (!isValidEmail(email)) {
+      const message = "Bitte eine gueltige E-Mail-Adresse eingeben.";
+      setMessage(message);
+      showToast(message, "error");
       return;
     }
 
@@ -185,18 +255,22 @@ const MSDachAuth = (function () {
       const apiUser = await loginViaApi(email, password);
       setSession(apiUser);
       setMessage("Login erfolgreich.", "success");
+      showToast("Login erfolgreich.", "success");
       showApp();
       return;
     } catch (apiError) {
       const user = loadUsers().find((item) => item.email === email);
       const isDefaultMaskedPassword = user?.passwort === "********" && user?.rolle === "admin" && password === "admin123";
       if (!user || user.active === false || (user.passwort !== password && !isDefaultMaskedPassword)) {
-        setMessage(apiError?.message || "E-Mail oder Passwort ist falsch.");
+        const message = "E-Mail oder Passwort ist falsch.";
+        setMessage(apiError?.message || message);
+        showToast(message, "error");
         return;
       }
 
       setSession(user);
       setMessage("Login erfolgreich.", "success");
+      showToast("Login erfolgreich.", "success");
       showApp();
     } finally {
       if (submitBtn) {
@@ -215,10 +289,26 @@ const MSDachAuth = (function () {
     setMessage("");
   }
 
+  function initPasswordToggle() {
+    const passwordInput = document.getElementById("loginPassword");
+    const toggleBtn = document.getElementById("passwordToggle");
+    if (!passwordInput || !toggleBtn) return;
+
+    toggleBtn.addEventListener("click", () => {
+      const isVisible = passwordInput.type === "text";
+      passwordInput.type = isVisible ? "password" : "text";
+      toggleBtn.classList.toggle("is-visible", !isVisible);
+      toggleBtn.setAttribute("aria-pressed", String(!isVisible));
+      toggleBtn.setAttribute("aria-label", isVisible ? "Passwort anzeigen" : "Passwort ausblenden");
+      passwordInput.focus();
+    });
+  }
+
   function init() {
     loadUsers();
 
     document.getElementById("loginForm")?.addEventListener("submit", handleLogin);
+    initPasswordToggle();
 
     setMessage("");
     if (getSessionUser()) {

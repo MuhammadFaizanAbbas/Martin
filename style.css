@@ -146,6 +146,53 @@ body.auth-locked .auth-screen {
   margin-bottom: 14px;
 }
 
+.password-field {
+  position: relative;
+  margin-bottom: 14px;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 52px;
+  margin-bottom: 0;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.password-toggle:hover,
+.password-toggle:focus-visible {
+  background: #f1f5f9;
+  color: #1795cf;
+  outline: none;
+}
+
+.password-toggle .eye-closed {
+  display: none;
+}
+
+.password-toggle.is-visible .eye-open {
+  display: none;
+}
+
+.password-toggle.is-visible .eye-closed {
+  display: block;
+}
+
 .auth-form input::placeholder {
   color: #b8bec7;
 }
@@ -312,6 +359,133 @@ body.auth-locked .auth-screen {
   color: white;
 }
 
+.user-details {
+  min-width: 0;
+}
+
+.user-email {
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 176px;
+}
+
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 999999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.toast {
+  min-width: 280px;
+  max-width: 380px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  font-size: 0.9rem;
+  display: grid;
+  grid-template-columns: 6px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  opacity: 0;
+  transform: translateX(16px);
+  animation: toastIn 200ms ease forwards;
+  pointer-events: auto;
+  position: relative;
+  overflow: hidden;
+}
+
+.toast .toast-accent {
+  width: 6px;
+  height: 100%;
+  border-radius: 6px;
+}
+
+.toast .toast-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.toast .toast-close:hover {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.toast .toast-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.toast .toast-progress > div {
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  background: #3b82f6;
+}
+
+.toast-success {
+  border-color: #bbf7d0;
+}
+
+.toast-success .toast-accent,
+.toast-success .toast-progress > div {
+  background: #22c55e;
+}
+
+.toast-error {
+  border-color: #fecaca;
+}
+
+.toast-error .toast-accent,
+.toast-error .toast-progress > div {
+  background: #ef4444;
+}
+
+.toast-info {
+  border-color: #c7d2fe;
+}
+
+.toast-info .toast-accent,
+.toast-info .toast-progress > div {
+  background: #3b82f6;
+}
+
+@keyframes toastIn {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toastOut {
+  to {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
 .logout-btn {
   display: flex;
   align-items: center;
@@ -336,6 +510,102 @@ body.auth-locked .auth-screen {
 
 .logout-btn svg {
   stroke: #f87171;
+}
+
+.logout-confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.logout-confirm-modal.active {
+  display: flex;
+}
+
+.logout-confirm-dialog {
+  width: min(420px, 100%);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+  padding: 26px;
+  text-align: center;
+  animation: logoutModalIn 160ms ease forwards;
+}
+
+.logout-confirm-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 14px;
+  border-radius: 12px;
+  background: #fee2e2;
+  color: #dc2626;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logout-confirm-dialog h2 {
+  font-size: 1.2rem;
+  color: #0f172a;
+  margin-bottom: 8px;
+}
+
+.logout-confirm-dialog p {
+  color: #64748b;
+  font-size: 0.92rem;
+  margin-bottom: 22px;
+}
+
+.logout-confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.logout-confirm-actions button {
+  height: 42px;
+  border-radius: 8px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex: 1;
+}
+
+.logout-confirm-cancel {
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.logout-confirm-cancel:hover {
+  background: #f1f5f9;
+}
+
+.logout-confirm-submit {
+  background: #dc2626;
+  color: #ffffff;
+  border: 1px solid #dc2626;
+}
+
+.logout-confirm-submit:hover {
+  background: #b91c1c;
+}
+
+@keyframes logoutModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* Main Content */

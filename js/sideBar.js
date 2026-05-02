@@ -35,19 +35,67 @@ const SidebarManager = (function() {
     }
   }
 
-  // Handle logout
-  function handleLogout() {
+  function ensureLogoutConfirmModal() {
+    var existing = document.getElementById('logoutConfirmModal');
+    if (existing) return existing;
+
+    var modal = document.createElement('div');
+    modal.id = 'logoutConfirmModal';
+    modal.className = 'logout-confirm-modal';
+    modal.innerHTML = `
+      <div class="logout-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="logoutConfirmTitle">
+        <div class="logout-confirm-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </div>
+        <h2 id="logoutConfirmTitle">Abmelden?</h2>
+        <p>Moechten Sie sich wirklich abmelden?</p>
+        <div class="logout-confirm-actions">
+          <button type="button" class="logout-confirm-cancel" id="logoutCancelBtn">Abbrechen</button>
+          <button type="button" class="logout-confirm-submit" id="logoutConfirmBtn">Abmelden</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  function closeLogoutConfirm() {
+    var modal = document.getElementById('logoutConfirmModal');
+    if (modal) modal.classList.remove('active');
+  }
+
+  function performLogout() {
     if (window.MSDachAuth && typeof window.MSDachAuth.logout === 'function') {
-      if (confirm('Möchten Sie sich abmelden?')) window.MSDachAuth.logout();
+      window.MSDachAuth.logout();
       return;
     }
-    if (confirm('Möchten Sie sich abmelden?')) {
-      alert('Sie wurden abgemeldet');
-      // Redirect to dashboard
-      if (typeof PageManager !== 'undefined') {
-        PageManager.showPage('dashboard');
-      }
+    if (typeof PageManager !== 'undefined') {
+      PageManager.showPage('dashboard');
     }
+  }
+
+  // Handle logout
+  function handleLogout() {
+    var modal = ensureLogoutConfirmModal();
+    modal.classList.add('active');
+
+    var cancelBtn = document.getElementById('logoutCancelBtn');
+    var confirmBtn = document.getElementById('logoutConfirmBtn');
+
+    if (cancelBtn) cancelBtn.onclick = closeLogoutConfirm;
+    if (confirmBtn) {
+      confirmBtn.onclick = function() {
+        closeLogoutConfirm();
+        performLogout();
+      };
+    }
+    modal.onclick = function(event) {
+      if (event.target === modal) closeLogoutConfirm();
+    };
   }
 
   // Add close button INSIDE sidebar for mobile
@@ -97,6 +145,10 @@ const SidebarManager = (function() {
       if (window.innerWidth > 768) {
         closeMobileSidebar();
       }
+    });
+
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') closeLogoutConfirm();
     });
   }
 
