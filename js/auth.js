@@ -316,16 +316,7 @@ const MSDachAuth = (function () {
       return;
     }
 
-    let shouldShowLogin = false;
-    try {
-      shouldShowLogin = localStorage.getItem(AUTH_LOCK_STORAGE_KEY) === "1";
-    } catch {}
-
-    if (shouldShowLogin) {
-      showAuth();
-    } else {
-      document.body.classList.remove("auth-locked");
-    }
+    showAuth();
   }
 
   return {
