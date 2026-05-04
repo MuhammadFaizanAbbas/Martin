@@ -50,6 +50,59 @@ const einstellungPage = (function () {
     }
   }
 
+  function ensureToastContainer() {
+    let container = document.getElementById("toast-container");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "toast-container";
+      container.className = "toast-container";
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
+  function showToast(message, type = "success", duration = 2600) {
+    const text = String(message || "").trim();
+    if (!text) return;
+
+    const container = ensureToastContainer();
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+
+    const accent = document.createElement("span");
+    accent.className = "toast-accent";
+
+    const body = document.createElement("span");
+    body.textContent = text;
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "toast-close";
+    close.setAttribute("aria-label", "Toast schliessen");
+    close.textContent = "x";
+
+    const progress = document.createElement("div");
+    progress.className = "toast-progress";
+    const progressInner = document.createElement("div");
+    progressInner.style.transition = `transform ${duration}ms linear`;
+    progress.appendChild(progressInner);
+
+    toast.append(accent, body, close, progress);
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      progressInner.style.transform = "scaleX(0)";
+    });
+
+    const remove = () => {
+      toast.style.animation = "toastOut 180ms ease forwards";
+      window.setTimeout(() => toast.remove(), 190);
+    };
+
+    close.addEventListener("click", remove);
+    window.setTimeout(remove, duration);
+  }
+
 
   function getConfiguredApiBase() {
     try {
@@ -299,7 +352,22 @@ const einstellungPage = (function () {
           </div>
           <div class="es-field">
             <label>Passwort*</label>
-            <input type="password" id="es-passwort" placeholder="Passwort eingeben">
+            <div class="es-password-wrap">
+              <input type="password" id="es-passwort" placeholder="Passwort eingeben">
+              <button type="button" class="es-password-toggle" id="es-password-toggle" aria-label="Passwort anzeigen" aria-pressed="false">
+                <span class="es-password-toggle-text"></span>
+                <svg class="eye-icon eye-open" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <svg class="eye-icon eye-closed" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 3l18 18" />
+                  <path d="M10.58 10.58A2 2 0 0 0 12 14a2 2 0 0 0 1.42-.58" />
+                  <path d="M9.88 4.24A9.67 9.67 0 0 1 12 4c6.5 0 10 8 10 8a18.64 18.64 0 0 1-2.36 3.45" />
+                  <path d="M6.61 6.61C3.77 8.5 2 12 2 12s3.5 8 10 8a9.73 9.73 0 0 0 4.39-1.06" />
+                </svg>
+              </button>
+            </div>
           </div>
           <div class="es-field">
             <label>Rolle*</label>
@@ -394,6 +462,14 @@ const einstellungPage = (function () {
       .es-field input, .es-field select { width: 100%; padding: 13px 16px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 0.92rem; color: #0f172a; background: white; box-sizing: border-box; transition: border-color 0.15s; }
       .es-field input:focus, .es-field select:focus { outline: none; border-color: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.1); }
       .es-field input::placeholder { color: #cbd5e1; }
+      .es-password-wrap { position: relative; }
+      .es-password-wrap input { padding-right: 92px; }
+      .es-password-toggle { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 6px; border: none; border-radius: 8px; background: transparent; color: #64748b; padding: 6px 8px; cursor: pointer; }
+      .es-password-toggle:hover, .es-password-toggle:focus-visible { background: #f1f5f9; color: #1795cf; outline: none; }
+      .es-password-toggle .eye-closed { display: none; }
+      .es-password-toggle.is-visible .eye-open { display: none; }
+      .es-password-toggle.is-visible .eye-closed { display: block; }
+      .es-password-toggle-text { font-size: 0.8rem; font-weight: 600; line-height: 1; }
       .es-field select { color: #94a3b8; }
       .es-field select.has-value { color: #0f172a; }
       .es-modal-footer { display: flex; align-items: center; gap: 14px; padding: 0 32px 28px; }
@@ -495,12 +571,46 @@ const einstellungPage = (function () {
     }
 
     clearErrors();
+    resetPasswordVisibility();
     document.getElementById("es-modal").classList.add("active");
   }
 
   function closeModal() {
     document.getElementById("es-modal")?.classList.remove("active");
+    resetPasswordVisibility();
     editingId = null;
+  }
+
+  function resetPasswordVisibility() {
+    const passwordInput = document.getElementById("es-passwort");
+    const toggleBtn = document.getElementById("es-password-toggle");
+    const toggleText = toggleBtn?.querySelector(".es-password-toggle-text");
+    if (!passwordInput || !toggleBtn || !toggleText) return;
+
+    passwordInput.type = "password";
+    toggleBtn.classList.remove("is-visible");
+    toggleBtn.setAttribute("aria-pressed", "false");
+    toggleBtn.setAttribute("aria-label", "Passwort anzeigen");
+    toggleText.textContent = "View";
+  }
+
+  function initPasswordToggle() {
+    const passwordInput = document.getElementById("es-passwort");
+    const toggleBtn = document.getElementById("es-password-toggle");
+    const toggleText = toggleBtn?.querySelector(".es-password-toggle-text");
+    if (!passwordInput || !toggleBtn || !toggleText) return;
+
+    toggleBtn.addEventListener("click", () => {
+      const isVisible = passwordInput.type === "text";
+      passwordInput.type = isVisible ? "password" : "text";
+      toggleBtn.classList.toggle("is-visible", !isVisible);
+      toggleBtn.setAttribute("aria-pressed", String(!isVisible));
+      toggleBtn.setAttribute("aria-label", isVisible ? "Passwort anzeigen" : "Passwort ausblenden");
+      toggleText.textContent = isVisible ? "View" : "Hidden";
+      passwordInput.focus();
+    });
+
+    resetPasswordVisibility();
   }
 
   function openDeactivateModal(userId) {
@@ -652,7 +762,7 @@ const einstellungPage = (function () {
             rolle: data.rl,
           });
         } catch (apiError) {
-          alert(apiError?.message || "Signup API fehlgeschlagen.");
+          showToast(apiError?.message || "Signup API fehlgeschlagen.", "error", 3200);
           return;
         }
 
@@ -748,6 +858,7 @@ const einstellungPage = (function () {
     contentArea.innerHTML = getHTML();
     renderUsers();
     refreshUsersFromAPI();
+    initPasswordToggle();
 
     document.getElementById("es-open-create")?.addEventListener("click", () => openModal("create"));
     document.getElementById("es-modal-close")?.addEventListener("click", closeModal);
