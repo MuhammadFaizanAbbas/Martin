@@ -1168,6 +1168,31 @@ async function fetchActivityForLead(leadId) {
     return firstLine || text;
   }
 
+  function withTimeout(promise, timeoutMs, fallbackValue) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(fallbackValue);
+      }, timeoutMs);
+
+      Promise.resolve(promise)
+        .then((value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        })
+        .catch(() => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(fallbackValue);
+        });
+    });
+  }
+
   function renderLeadNote(note) {
     const author = String(
       note?.author ||
@@ -3185,36 +3210,17 @@ const payload = {
   const lead = leadsData.find((l) => l.id === id);
   if (!lead) return;
   currentViewLeadId = id;
+  const displayDelegieren = toDisplayValue(lead.delegieren);
   
   const titleEl = document.getElementById("kundenViewTitle");
   const contentEl = document.getElementById("kundenViewContent");
   if (titleEl) titleEl.textContent = (lead.salutation ? lead.salutation + " " : "") + lead.name + " – Details";
-  if (contentEl) {
-    contentEl.innerHTML = `<div style="text-align: center; padding: 20px;">⏳ Lade Details...</div>`;
-  }
-  
   const modal = document.getElementById("kundenViewModal");
   if (modal) modal.classList.add("active");
-  
-  // Fetch notes and activities with error handling
-  let notes = [];
-  let activities = [];
-  
-  try {
-    notes = await fetchNotesForLead(lead.id);
-  } catch (err) {
-    console.warn("Failed to fetch notes:", err);
-    notes = [];
-  }
-  
-  try {
-    activities = await fetchActivityForLead(lead.id);
-  } catch (err) {
-    console.warn("Failed to fetch activities:", err);
-    activities = [];
-  }
-  
-  if (contentEl) {
+
+  const renderViewContent = (notes = [], activities = []) => {
+    if (!contentEl || String(currentViewLeadId) !== String(id)) return;
+
     let notesHtml = '';
     if (notes && notes.length > 0) {
       notesHtml = notes.map(note => `
@@ -3232,7 +3238,7 @@ const payload = {
     } else {
       notesHtml = `<div class="empty-notes">Keine Notizen vorhanden</div>`;
     }
-    
+
     let activitiesHtml = '';
     if (activities && activities.length > 0) {
       activitiesHtml = activities.map(activity => {
@@ -3261,7 +3267,7 @@ const payload = {
     } else {
       activitiesHtml = `<div class="empty-activities">Keine Aktivitäten vorhanden</div>`;
     }
-    
+
     contentEl.innerHTML = `
       <div class="k-view-section">
         <h4>Kontaktinformationen</h4>
@@ -3311,7 +3317,21 @@ const payload = {
         </div>
       </div>
     `;
-  }
+  };
+
+  renderViewContent(
+    Array.isArray(lead.notes) ? lead.notes : [],
+    Array.isArray(lead.activities) ? lead.activities : [],
+  );
+
+  const notesPromise = withTimeout(fetchNotesForLead(lead.id), 4000, Array.isArray(lead.notes) ? lead.notes : []);
+  const activitiesPromise = withTimeout(fetchActivityForLead(lead.id), 4000, Array.isArray(lead.activities) ? lead.activities : []);
+
+  const [notes, activities] = await Promise.all([notesPromise, activitiesPromise]);
+  renderViewContent(
+    Array.isArray(notes) ? notes : [],
+    Array.isArray(activities) ? activities : [],
+  );
 };
 
  window.callKunde = async (id) => {
