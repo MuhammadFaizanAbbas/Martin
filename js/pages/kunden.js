@@ -1,4 +1,4 @@
-const kundenPage = (function () {
+﻿const kundenPage = (function () {
   let contentArea = null;
   let titleEl = null;
   let fullLeadsData = [];
@@ -1295,8 +1295,8 @@ async function fetchActivityForLead(leadId) {
       ort: toDisplayValue(apiLead.ort),
           status: normalizeLeadStatus(apiLead.status),
           statusClass: getStatusClass(normalizeLeadStatus(apiLead.status)),
-      quelle: toDisplayValue(apiLead.lead_quelle),
-      bearbeiter: toDisplayValue(apiLead.bearbeiter),
+      quelle: toDisplayValue(firstNonEmpty(apiLead.lead_quelle, apiLead.quelle, apiLead.source)),
+      bearbeiter: toDisplayValue(firstNonEmpty(apiLead.bearbeiter, apiLead.owner, apiLead.assignee)),
           summe: apiLead.summe_netto ? `$ ${formatNumber(apiLead.summe_netto)}` : "$ 0,00",
           datum: apiLead.created_at ? apiLead.created_at.split(" ")[0] : apiLead.datum || "â€”",
           dachflaeche: apiLead.dachflaeche_m2 || "",
@@ -1320,7 +1320,11 @@ async function fetchActivityForLead(leadId) {
           notes: [],
           activities: [],
         })));
-        return dedupeLeadList(mappedCachedLeads);
+        return dedupeLeadList(
+          mappedCachedLeads.map((lead, index) =>
+            normalizeDelegationFields(lead, rawCachedList[index], true),
+          ),
+        );
       }
       console.error("Failed to fetch leads:", result.error);
       return [];
@@ -1369,7 +1373,11 @@ async function fetchActivityForLead(leadId) {
       notes: [],
       activities: [],
     })));
-    return dedupeLeadList(mappedLeads);
+    return dedupeLeadList(
+      mappedLeads.map((lead, index) =>
+        normalizeDelegationFields(lead, rawList[index], false),
+      ),
+    );
   }
 
   async function fetchDashboardStats() {
@@ -1727,6 +1735,37 @@ function protectFilterDropdowns() {
     const mappedStatus =
       STATUS_MAPPING[trimmedStatus] ?? STATUS_MAPPING[rawStatus];
     return String(mappedStatus ?? trimmedStatus).trim();
+  }
+
+  function firstNonEmpty(...values) {
+    for (const value of values) {
+      if (value == null) continue;
+      const text = String(value).trim();
+      if (text) return value;
+    }
+    return "";
+  }
+
+  function normalizeDelegationFields(lead, apiLead, useDisplayFallbacks = false) {
+    const resolvedBearbeiter =
+      firstNonEmpty(apiLead?.bearbeiter, apiLead?.owner, apiLead?.assignee) ||
+      lead?.bearbeiter ||
+      "";
+    const resolvedDelegieren = resolveLeadDelegation(
+      resolvedBearbeiter || "â€”",
+      firstNonEmpty(apiLead?.delegieren, apiLead?.delegate, apiLead?.delegated_to),
+    );
+
+    return {
+      ...lead,
+      quelle: useDisplayFallbacks
+        ? toDisplayValue(firstNonEmpty(apiLead?.lead_quelle, apiLead?.quelle, apiLead?.source) || lead?.quelle)
+        : (firstNonEmpty(apiLead?.lead_quelle, apiLead?.quelle, apiLead?.source) || lead?.quelle || "â€”"),
+      bearbeiter: useDisplayFallbacks
+        ? toDisplayValue(resolvedBearbeiter || lead?.bearbeiter)
+        : (resolvedBearbeiter || lead?.bearbeiter || "â€”"),
+      delegieren: resolvedDelegieren || (useDisplayFallbacks ? "Ã¢â‚¬â€" : "â€”"),
+    };
   }
 
   function getDelegationOverrideForBearbeiter(bearbeiter) {

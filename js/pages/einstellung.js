@@ -1,10 +1,9 @@
-const einstellungPage = (function () {
+﻿const einstellungPage = (function () {
   let contentArea = null;
   let titleEl = null;
   const USERS_STORAGE_KEY = "msdach-users-v1";
   const DELEGATION_RULES_KEY = "msdach-user-delegations-v1";
   const UPDATE_DELEGIEREN_SAME = "/api/update_delegieren";
-  const UPDATE_DELEGIEREN_DIRECT = "https://goarrow.ai/test/update_delegieren.php";
   const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
   const LOCAL_DEV_API_ORIGIN = "http://127.0.0.1:3001";
   const ROLE_OPTIONS = ["admin", "teamlead", "backoffice", "monteur"];
@@ -13,6 +12,7 @@ const einstellungPage = (function () {
     { id: 1, vorname: "Martin", nachname: "Schwaak", email: "admin@msdach.com", passwort: "********", rolle: "admin", active: true, delegatedTo: "" },
     { id: 2, vorname: "André", nachname: "Philipp", email: "andre@msdach.com", passwort: "********", rolle: "user", active: true, delegatedTo: "" },
     { id: 3, vorname: "Philipp", nachname: "Kruse", email: "philipp@msdach.com", passwort: "********", rolle: "user", active: true, delegatedTo: "" },
+    { id: 4, vorname: "Simon", nachname: "", email: "simon@msdach.com", passwort: "********", rolle: "user", active: true, delegatedTo: "" },
   ];
 
   let users = loadUsers();
@@ -201,12 +201,15 @@ const einstellungPage = (function () {
   function getDelegationTargetOptions(userId) {
     const currentUser = users.find((u) => String(u.id) === String(userId));
     const currentName = getUserAssigneeName(currentUser);
+    const defaultNames = DEFAULT_USERS
+      .map((u) => getUserAssigneeName(u))
+      .filter(Boolean);
     const dynamicNames = users
-      .filter((u) => u.id !== userId && u.active !== false)
+      .filter((u) => String(u.id) !== String(userId) && u.active !== false)
       .map((u) => getUserAssigneeName(u))
       .filter(Boolean);
 
-    return Array.from(new Set([...ASSIGNEE_OPTIONS, ...dynamicNames]))
+    return Array.from(new Set([...ASSIGNEE_OPTIONS, ...defaultNames, ...dynamicNames]))
       .filter((name) => name && name !== currentName);
   }
 
@@ -255,8 +258,8 @@ const einstellungPage = (function () {
     };
 
     try {
-      const response = await fetch(UPDATE_DELEGIEREN_SAME, {
-        method: "POST",
+      const response = await fetch(resolveApiUrl(UPDATE_DELEGIEREN_SAME), {
+        method: "PATCH",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
@@ -271,23 +274,9 @@ const einstellungPage = (function () {
         throw new Error(error?.message || "Delegieren Update fehlgeschlagen");
       }
 
-      console.warn("Same-origin delegieren update failed in local dev, trying direct fallback:", error?.message || error);
+      console.warn("Same-origin delegieren update failed in local dev:", error?.message || error);
     }
-
-    const formData = new URLSearchParams();
-    formData.append("bearbeiter", jsonPayload.bearbeiter);
-    formData.append("delegieren", jsonPayload.delegieren);
-
-    const response = await fetch(UPDATE_DELEGIEREN_DIRECT, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/plain, */*",
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: formData.toString(),
-    });
-
-    return await parseApiResponse(response);
+    throw new Error("Delegieren Update fehlgeschlagen");
   }
 
   async function updateMitarbeiterStatusOnAPI(email, active) {
@@ -321,7 +310,7 @@ const einstellungPage = (function () {
           <svg width="16" height="16" fill="none" stroke="white" stroke-width="2.5" viewBox="0 0 24 24">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
-          Neuen Benutzer hinzufügen
+          Neuen Benutzer hinzufÃ¼gen
         </button>
       </div>
 
@@ -332,7 +321,7 @@ const einstellungPage = (function () {
       <div class="es-modal-box">
         <div class="es-modal-header">
           <div>
-            <div class="es-modal-title" id="es-modal-title">Neuen Benutzer hinzufügen</div>
+            <div class="es-modal-title" id="es-modal-title">Neuen Benutzer hinzufÃ¼gen</div>
             <div class="es-modal-sub">Anmeldeformular</div>
           </div>
           <button class="es-modal-close" id="es-modal-close">&times;</button>
@@ -372,7 +361,7 @@ const einstellungPage = (function () {
           <div class="es-field">
             <label>Rolle*</label>
             <select id="es-rolle">
-              <option value="" disabled selected>Wählen Sie eine Rolle</option>
+              <option value="" disabled selected>WÃ¤hlen Sie eine Rolle</option>
               ${ROLE_OPTIONS.map((role) => `<option value="${role}">${role}</option>`).join("")}
             </select>
           </div>
@@ -389,7 +378,7 @@ const einstellungPage = (function () {
         <div class="es-modal-header">
           <div>
             <div class="es-modal-title">Benutzer deaktivieren</div>
-            <div class="es-modal-sub">Wählen Sie aus, wem die Leads delegiert werden sollen</div>
+            <div class="es-modal-sub">WÃ¤hlen Sie aus, wem die Leads delegiert werden sollen</div>
           </div>
           <button class="es-modal-close" id="es-deactivate-close">&times;</button>
         </div>
@@ -397,7 +386,7 @@ const einstellungPage = (function () {
           <div class="es-field">
             <label>Delegieren an</label>
             <select id="es-deactivate-delegate">
-              <option value="">Bitte Benutzer wählen</option>
+              <option value="">Bitte Benutzer wÃ¤hlen</option>
             </select>
           </div>
         </div>
@@ -495,7 +484,7 @@ const einstellungPage = (function () {
     if (!wrap) return;
 
     if (!users.length) {
-      wrap.innerHTML = `<div class="es-empty">Noch keine Benutzer angelegt.<br>Klicken Sie auf „Neuen Benutzer hinzufügen“.</div>`;
+      wrap.innerHTML = `<div class="es-empty">Noch keine Benutzer angelegt.<br>Klicken Sie auf â€žNeuen Benutzer hinzufÃ¼genâ€œ.</div>`;
       return;
     }
 
@@ -515,7 +504,7 @@ const einstellungPage = (function () {
             <div class="es-status-wrap">
               <span class="es-status-text ${u.active === false ? "inactive" : ""}">${u.active === false ? "Inaktiv" : "Aktiv"}</span>
               <label class="es-toggle" title="Benutzer aktiv/inaktiv">
-                <input type="checkbox" ${u.active !== false ? "checked" : ""} ${u.active === false ? "disabled" : ""} onchange="window.esToggleUserStatus('${userId}', this)">
+                <input type="checkbox" ${u.active !== false ? "checked" : ""} onchange="window.esToggleUserStatus('${userId}', this)">
                 <span class="es-toggle-slider"></span>
               </label>
             </div>
@@ -526,7 +515,7 @@ const einstellungPage = (function () {
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
               </svg>
             </button>
-            <button class="es-icon-btn es-delete-btn" onclick="window.esDeleteUser('${userId}')" title="Löschen">
+            <button class="es-icon-btn es-delete-btn" onclick="window.esDeleteUser('${userId}')" title="LÃ¶schen">
               <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                 <polyline points="3 6 5 6 21 6"/>
                 <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
@@ -551,7 +540,7 @@ const einstellungPage = (function () {
       const u = users.find((x) => String(x.id) === String(userId));
       if (!u) return;
       titleEl2.textContent = "Benutzer bearbeiten";
-      submitBtn.textContent = "Änderungen speichern";
+      submitBtn.textContent = "Ã„nderungen speichern";
       document.getElementById("es-vorname").value = u.vorname;
       document.getElementById("es-nachname").value = u.nachname;
       document.getElementById("es-email").value = u.email;
@@ -560,7 +549,7 @@ const einstellungPage = (function () {
       rolSel.value = u.rolle;
       rolSel.classList.add("has-value");
     } else {
-      titleEl2.textContent = "Neuen Benutzer hinzufügen";
+      titleEl2.textContent = "Neuen Benutzer hinzufÃ¼gen";
       submitBtn.textContent = "Benutzer erstellen";
       document.getElementById("es-vorname").value = "";
       document.getElementById("es-nachname").value = "";
@@ -620,7 +609,7 @@ const einstellungPage = (function () {
 
     const user = users.find((u) => String(u.id) === String(userId));
     const options = getDelegationTargetOptions(userId);
-    select.innerHTML = `<option value="">Bitte Benutzer wählen</option>${options.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("")}`;
+    select.innerHTML = `<option value="">Bitte Benutzer wÃ¤hlen</option>${options.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("")}`;
     if (user?.delegatedTo && options.includes(user.delegatedTo)) {
       select.value = user.delegatedTo;
       select.classList.add("has-value");
@@ -648,7 +637,7 @@ const einstellungPage = (function () {
     const selectedDelegate = String(document.getElementById("es-deactivate-delegate")?.value || "").trim();
     const confirmBtn = document.getElementById("es-deactivate-confirm");
     if (!user || !selectedDelegate) {
-      alert("Bitte wählen Sie einen Delegieren-Benutzer aus.");
+      showToast("Bitte wÃ¤hlen Sie einen Delegieren-Benutzer aus.", "error", 2600);
       return;
     }
 
@@ -671,8 +660,9 @@ const einstellungPage = (function () {
       saveUsers();
       renderUsers();
       closeDeactivateModal();
+      showToast(`${getUserDisplayName(user)} wurde deaktiviert und an ${selectedDelegate} delegiert.`, "success", 2800);
     } catch (error) {
-      alert(error?.message || "Delegieren Update fehlgeschlagen.");
+      showToast(error?.message || "Delegieren Update fehlgeschlagen.", "error", 3200);
     } finally {
       if (confirmBtn) {
         confirmBtn.disabled = false;
@@ -707,9 +697,9 @@ const einstellungPage = (function () {
 
     if (!vn) { showError("es-vorname", "Vorname ist erforderlich"); ok = false; }
     if (!nn) { showError("es-nachname", "Nachname ist erforderlich"); ok = false; }
-    if (!em || !/\S+@\S+\.\S+/.test(em)) { showError("es-email", "Gültige E-Mail erforderlich"); ok = false; }
+    if (!em || !/\S+@\S+\.\S+/.test(em)) { showError("es-email", "GÃ¼ltige E-Mail erforderlich"); ok = false; }
     if (!editingId && !pw) { showError("es-passwort", "Passwort ist erforderlich"); ok = false; }
-    if (!rl) { showError("es-rolle", "Bitte eine Rolle wählen"); ok = false; }
+    if (!rl) { showError("es-rolle", "Bitte eine Rolle wÃ¤hlen"); ok = false; }
 
     return ok ? { vn, nn, em, pw, rl } : null;
   }
@@ -795,7 +785,7 @@ const einstellungPage = (function () {
   window.esDeleteUser = async (id) => {
     const u = users.find((x) => String(x.id) === String(id));
     if (!u) return;
-    if (confirm(`Benutzer „${getUserDisplayName(u)}” wirklich löschen?`)) {
+    if (confirm(`Benutzer â€ž${getUserDisplayName(u)}â€ wirklich lÃ¶schen?`)) {
       try {
         await deleteUserOnAPI(id);
       } catch (apiError) {
@@ -810,10 +800,6 @@ const einstellungPage = (function () {
   window.esToggleUserStatus = (id, checkboxEl) => {
     const user = users.find((u) => String(u.id) === String(id));
     if (!user) return;
-    if (user.active === false) {
-      if (checkboxEl) checkboxEl.checked = false;
-      return;
-    }
     const isActive = !!checkboxEl?.checked;
 
     if (isActive) {
@@ -890,4 +876,5 @@ const einstellungPage = (function () {
 window.einstellungPage = einstellungPage;
 window.settingsPage = window.einstellungPage;
 console.log("einstellung.js loaded - window.einstellungPage exists:", !!window.einstellungPage);
+
 

@@ -160,6 +160,60 @@ async function updateMitarbeiterStatus(email, active) {
   return payload;
 }
 
+async function mitarbeiterRequest(query = '', options = {}) {
+  const serviceRole = getServiceRole();
+  if (!serviceRole) {
+    const error = new Error('Missing SERVICE_ROLE or SUPABASE_SERVICE_ROLE_KEY env var');
+    error.status = 500;
+    throw error;
+  }
+
+  const separator = query ? `?${query.replace(/^\?+/, '')}` : '';
+  const response = await fetch(`${MITARBEITER_BASE}${separator}`, {
+    ...options,
+    headers: {
+      apikey: serviceRole,
+      Authorization: `Bearer ${serviceRole}`,
+      Accept: 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {}),
+    },
+  });
+
+  const text = await response.text();
+  let payload = [];
+  try { payload = text ? JSON.parse(text) : []; }
+  catch { payload = { raw: text }; }
+
+  if (!response.ok) {
+    const error = new Error(payload?.message || payload?.raw || `Supabase HTTP ${response.status}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
+async function updateMitarbeiterEmail(oldEmail, newEmail) {
+  return mitarbeiterRequest(`email=eq.${encodeURIComponent(oldEmail)}`, {
+    method: 'PATCH',
+    headers: {
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify({ email: newEmail }),
+  });
+}
+
+async function deleteMitarbeiterByEmail(email) {
+  return mitarbeiterRequest(`email=eq.${encodeURIComponent(email)}`, {
+    method: 'DELETE',
+    headers: {
+      Prefer: 'return=representation',
+    },
+  });
+}
+
 async function authRequest(path, options = {}) {
   const serviceRole = getServiceRole();
   if (!serviceRole) {
@@ -194,6 +248,20 @@ async function authRequest(path, options = {}) {
   return payload;
 }
 
+async function listAuthUsers() {
+  const payload = await authRequest('/admin/users?page=1&per_page=1000');
+  return Array.isArray(payload.users) ? payload.users : [];
+}
+
+async function cleanupOrphanedMitarbeiterEmail(email) {
+  const users = await listAuthUsers();
+  const emailInAuth = users.some((user) => String(user?.email || '').trim().toLowerCase() === email);
+  if (emailInAuth) return false;
+
+  const deletedRows = await deleteMitarbeiterByEmail(email);
+  return Array.isArray(deletedRows) ? deletedRows.length > 0 : !!deletedRows;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
@@ -209,8 +277,7 @@ export default async function handler(req, res) {
     if (!body || typeof body !== 'object') body = {};
 
     if (req.method === 'GET') {
-      const payload = await authRequest('/admin/users?page=1&per_page=1000');
-      const users = (payload.users || []).map(mapAuthUser);
+      const users = (await listAuthUsers()).map(mapAuthUser);
       return jsonResponse(res, 200, { status: 'success', data: users, users });
     }
 
@@ -243,7 +310,7 @@ export default async function handler(req, res) {
         return jsonResponse(res, 400, { status: 'error', message: 'vorname, email and password are required' });
       }
 
-      const created = await signupRequest({
+      const signupPayload = {
         email,
         password,
         data: {
@@ -255,7 +322,21 @@ export default async function handler(req, res) {
           nachname: metadata.nachname,
           role: metadata.role,
         },
-      });
+      };
+
+      let created;
+      try {
+        created = await signupRequest(signupPayload);
+      } catch (err) {
+        const message = String(err?.message || '');
+        const isDuplicateMitarbeiterEmail = /mitarbeiter_email_key/i.test(message) || /duplicate key value/i.test(message);
+        if (!isDuplicateMitarbeiterEmail) throw err;
+
+        const cleanedUp = await cleanupOrphanedMitarbeiterEmail(email);
+        if (!cleanedUp) throw err;
+
+        created = await signupRequest(signupPayload);
+      }
 
       return jsonResponse(res, 200, { status: 'success', data: mapAuthUser(created.user), user: mapAuthUser(created.user), session: created.session });
     }
@@ -275,6 +356,10 @@ export default async function handler(req, res) {
       const userId = String(body.id || body.user_id || '').trim();
       if (!userId) return jsonResponse(res, 400, { status: 'error', message: 'id is required' });
 
+      const users = await listAuthUsers();
+      const existingUser = users.find((user) => String(user?.id || '').trim() === userId);
+      const previousEmail = String(existingUser?.email || '').trim().toLowerCase();
+
       const updatePayload = {
         email: body.email ? String(body.email).trim().toLowerCase() : undefined,
         user_metadata: buildMetadata(body),
@@ -289,6 +374,11 @@ export default async function handler(req, res) {
         method: 'PUT',
         body: JSON.stringify(updatePayload),
       });
+
+      const nextEmail = String(updated?.email || updatePayload.email || '').trim().toLowerCase();
+      if (previousEmail && nextEmail && previousEmail !== nextEmail) {
+        await updateMitarbeiterEmail(previousEmail, nextEmail);
+      }
 
       return jsonResponse(res, 200, { status: 'success', data: mapAuthUser(updated), user: mapAuthUser(updated) });
     }

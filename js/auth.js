@@ -1,4 +1,4 @@
-const MSDachAuth = (function () {
+﻿const MSDachAuth = (function () {
   const USERS_STORAGE_KEY = "msdach-users-v1";
   const SESSION_STORAGE_KEY = "msdach-session-v1";
   const AUTH_LOCK_STORAGE_KEY = "msdach-auth-lock-v1";
@@ -6,7 +6,7 @@ const MSDachAuth = (function () {
 
   const DEFAULT_USERS = [
     { id: 1, vorname: "Martin", nachname: "Schwaak", email: "admin@msdach.com", passwort: "admin123", rolle: "admin", active: true, delegatedTo: "" },
-    { id: 2, vorname: "Andre", nachname: "Philipp", email: "andre@msdach.com", passwort: "user123", rolle: "backoffice", active: true, delegatedTo: "" },
+    { id: 2, vorname: "André", nachname: "Philipp", email: "andre@msdach.com", passwort: "user123", rolle: "backoffice", active: true, delegatedTo: "" },
     { id: 3, vorname: "Philipp", nachname: "Kruse", email: "philipp@msdach.com", passwort: "user123", rolle: "teamlead", active: true, delegatedTo: "" },
   ];
 
@@ -335,3 +335,4 @@ window.MSDachAuth = MSDachAuth;
 document.addEventListener("DOMContentLoaded", () => {
   MSDachAuth.init();
 });
+
