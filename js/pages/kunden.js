@@ -16,6 +16,7 @@
   const ACTIVITY_FETCH_SAME = "/api/lead_activity";
   const NOTES_FETCH_SAME = "/api/lead_notes";
   const UPDATE_API_SAME = "/api/update_lead";
+  const APPLY_COMMISSION_API = "/api/apply_commission";
   const BULK_EMAIL_WEBHOOK_URL =
     "https://msdach.app.n8n.cloud/webhook/send_bulk_emails";
   const KUNDEN_AUTO_REFRESH_MS = 5 * 60 * 1000;
@@ -109,6 +110,19 @@ const ACTIVITY_LOG_API = "https://bmnxecoddcxcwvqukujh.supabase.co/rest/v1/Aktiv
     const base = getConfiguredApiBase();
     if (!base) return apiPath;
     return `${base}${apiPath.startsWith("/") ? apiPath : `/${apiPath}`}`;
+  }
+
+  function getCurrentSessionUser() {
+    try {
+      if (window.MSDachAuth && typeof window.MSDachAuth.getCurrentUser === "function") {
+        return window.MSDachAuth.getCurrentUser();
+      }
+    } catch {}
+    try {
+      return window.currentMSDachUser || null;
+    } catch {
+      return null;
+    }
   }
 
   function getCorsSafeEndpoints(sameOriginUrl, proxyUrl, altProxyUrl) {
@@ -1823,6 +1837,45 @@ function protectFilterDropdowns() {
     return "";
   }
 
+  async function applyCommissionForLead(lead, newStatus, discountChoice = "full") {
+    const contractType = getCommissionContractTypeForStatus(newStatus);
+    if (!contractType) return null;
+
+    const currentUser = getCurrentSessionUser();
+    const response = await fetch(resolveApiUrl(APPLY_COMMISSION_API), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        lead_id: String(lead.id),
+        contract_type: contractType,
+        price_tag: getCommissionPriceTag(discountChoice),
+        created_by_email: String(currentUser?.email || "").trim().toLowerCase(),
+      }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.status === "error") {
+      throw new Error(payload?.message || `Commission apply failed (HTTP ${response.status})`);
+    }
+
+    return payload;
+  }
+
+  function getCommissionContractTypeForStatus(status) {
+    const canonical = getCanonicalStatus(status);
+    if (canonical === "EA Beauftragung") return "EA";
+    if (canonical === "NF Beauftragung") return "NF";
+    if (canonical === "Beauftragung") return "B";
+    return "";
+  }
+
+  function getCommissionPriceTag(discountChoice) {
+    return String(discountChoice || "").trim().toLowerCase() === "discount" ? "N" : "H";
+  }
+
   function getStatusClass(status) {
     const statusLower = normalizeStatusValue(status);
     if (!statusLower) return "badge-neutral";
@@ -2606,9 +2659,11 @@ function openEditStatusModal(leadId) {
       return;
     }
     // Show confirmation for EA Beauftragung
+  let commissionMeta = null;
   const confirmed = await new Promise((resolve) => {
     const handleConfirmation = async () => {
-      const proceed = showBeauftragungConfirmation(lead.id, newStatus, previousStatus, async () => {
+      const proceed = showBeauftragungConfirmation(lead.id, newStatus, previousStatus, async (meta) => {
+        commissionMeta = meta || null;
         resolve(true);
       });
       if (proceed === true) {
@@ -2621,7 +2676,7 @@ function openEditStatusModal(leadId) {
     handleConfirmation();
     
     // If no confirmation needed, resolve immediately
-    if (newStatus !== "EA Beauftragung" && newStatus !== "EA beauftragt") {
+    if (!getCommissionContractTypeForStatus(newStatus)) {
       resolve(true);
     }
   });
@@ -2638,6 +2693,18 @@ function openEditStatusModal(leadId) {
       });
 
       await updateLeadOnAPI(lead.id, payload);
+      if (getCommissionContractTypeForStatus(newStatus)) {
+        const commissionResponse = await applyCommissionForLead(
+          lead,
+          newStatus,
+          commissionMeta?.discountChoice || "full",
+        );
+        const amount = Number(commissionResponse?.commission?.commission_amount || 0);
+        if (Number.isFinite(amount)) {
+          lead.commission = amount;
+          queuePendingUpdate(lead.id, { commission: amount });
+        }
+      }
       applyLeadStatusTransition(lead, newStatus, previousStatus);
 
       // Clear caches to force refresh
@@ -2645,7 +2712,10 @@ function openEditStatusModal(leadId) {
       notesCache.delete(String(lead.id));
       
       console.log(`Lead ${leadId} status updated from ${previousStatus} to ${newStatus}`);
-      showToast(`Status wurde auf ${newStatus} gesetzt`, "success", 2200);
+      const commissionLabel = getCommissionContractTypeForStatus(newStatus)
+        ? " und Commissioning gesetzt"
+        : "";
+      showToast(`Status wurde auf ${newStatus} gesetzt${commissionLabel}`, "success", 2200);
       
       // Re-render everything
       renderStats();  // Update stats display first
@@ -2668,18 +2738,22 @@ function showBeauftragungConfirmation(leadId, newStatus, previousStatus, saveCal
   const lead = leadsData.find((l) => String(l.id) === String(leadId));
   if (!lead) return false;
   
-  // Only show for EA Beauftragung
-  if (newStatus !== "EA Beauftragung" && newStatus !== "EA beauftragt") {
-    return true; // Proceed without confirmation
+  const contractType = getCommissionContractTypeForStatus(newStatus);
+  if (!contractType) {
+    return true;
   }
   
   const currentSumme = lead.summe ? lead.summe.replace('$ ', '') : "0,00";
+  const titleLabel =
+    contractType === "EA" ? "EA Beauftragung" :
+    contractType === "NF" ? "NF Beauftragung" :
+    "Beauftragung";
   
   const modalHtml = `
     <div id="beauftragungConfirmModal" class="k-modal-overlay">
       <div class="k-modal-content" style="max-width: 500px;">
         <div class="k-modal-header">
-          <h3>📋 EA Beauftragung Bestätigung</h3>
+          <h3>📋 ${escapeHtml(titleLabel)} Bestätigung</h3>
           <button class="k-close-btn" id="closeConfirmModal">&times;</button>
         </div>
         <div class="k-modal-body">
@@ -2695,11 +2769,11 @@ function showBeauftragungConfirmation(leadId, newStatus, previousStatus, saveCal
             
             <div style="display: flex; gap: 20px; margin-bottom: 16px;">
               <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                <input type="checkbox" id="discountCheckbox1" style="width: 18px; height: 18px; cursor: pointer;">
+                <input type="radio" name="commissionPriceTag" value="full" id="discountCheckbox1" checked style="width: 18px; height: 18px; cursor: pointer;">
                 <span>Full</span>
               </label>
               <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                <input type="checkbox" id="discountCheckbox2" style="width: 18px; height: 18px; cursor: pointer;">
+                <input type="radio" name="commissionPriceTag" value="discount" id="discountCheckbox2" style="width: 18px; height: 18px; cursor: pointer;">
                 <span>Discount</span>
               </label>
             </div>
@@ -2708,13 +2782,13 @@ function showBeauftragungConfirmation(leadId, newStatus, previousStatus, saveCal
           
           <div style="margin: 16px 0; padding: 12px; background: #fef3c7; border-radius: 8px; border-left: 4px solid #f59e0b;">
             <div style="font-size: 0.85rem; color: #92400e;">
-              ⚡ Nach Bestätigung wird der Status zu "EA Beauftragung" aktualisiert.
+              ⚡ Nach Bestätigung wird der Status zu "${escapeHtml(titleLabel)}" aktualisiert und Commissioning gesetzt.
             </div>
           </div>
           
           <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
             <button type="button" id="cancelConfirm" class="k-btn-outline" style="padding: 10px 24px;">Abbrechen</button>
-            <button type="button" id="confirmBeauftragung" class="k-btn-green" style="padding: 10px 24px;">✅ EA Beauftragung Bestätigen</button>
+            <button type="button" id="confirmBeauftragung" class="k-btn-green" style="padding: 10px 24px;">✅ ${escapeHtml(titleLabel)} Bestätigen</button>
           </div>
         </div>
       </div>
@@ -2743,24 +2817,15 @@ function showBeauftragungConfirmation(leadId, newStatus, previousStatus, saveCal
   });
   
   confirmBtn?.addEventListener('click', async () => {
-    const discount5 = document.getElementById("discountCheckbox1")?.checked || false;
-    const discount10 = document.getElementById("discountCheckbox2")?.checked || false;
-    const discount15 = document.getElementById("discountCheckbox3")?.checked || false;
-    const discount20 = document.getElementById("discountCheckbox4")?.checked || false;
-    
-    let discountPercent = 0;
-    if (discount5) discountPercent = 5;
-    if (discount10) discountPercent = 10;
-    if (discount15) discountPercent = 15;
-    if (discount20) discountPercent = 20;
-    
-    const discountMessage = discountPercent > 0 ? ` mit ${discountPercent}% Rabatt` : " ohne Rabatt";
+    const discountChoice =
+      document.querySelector('input[name="commissionPriceTag"]:checked')?.value || "full";
+    const discountMessage = discountChoice === "discount" ? " mit Discount" : " ohne Rabatt";
     
     closeModal();
     
     // Log the confirmation
     const actor = resolveActivityActorForLead(leadId, lead.bearbeiter);
-    const activityText = `${actor} hat EA Beauftragung bestätigt${discountMessage} (Summe: $ ${currentSumme})`;
+    const activityText = `${actor} hat ${titleLabel} bestätigt${discountMessage} (Summe: $ ${currentSumme})`;
     
     addOptimisticActivity(leadId, {
       text: activityText,
@@ -2774,7 +2839,7 @@ function showBeauftragungConfirmation(leadId, newStatus, previousStatus, saveCal
         bearbeiter: actor,
         leadName: lead.name,
         summe: currentSumme,
-        discount: discountPercent
+        discount: discountChoice
       });
     } catch (e) {
       console.warn("Activity log failed:", e);
@@ -2782,7 +2847,7 @@ function showBeauftragungConfirmation(leadId, newStatus, previousStatus, saveCal
     
     // Call the original save callback
     if (saveCallback) {
-      await saveCallback();
+      await saveCallback({ discountChoice, contractType });
     }
   });
   
