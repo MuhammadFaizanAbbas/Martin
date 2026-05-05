@@ -1,4 +1,4 @@
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,11 +14,13 @@ const entriesToCopy = [
 ];
 
 async function main() {
-  await rm(DIST_DIR, { recursive: true, force: true });
   await mkdir(DIST_DIR, { recursive: true });
 
   for (const entry of entriesToCopy) {
-    await cp(path.join(ROOT_DIR, entry), path.join(DIST_DIR, entry), { recursive: true });
+    await cp(path.join(ROOT_DIR, entry), path.join(DIST_DIR, entry), {
+      force: true,
+      recursive: true,
+    });
   }
 
   console.log(`Static build complete: ${DIST_DIR}`);
