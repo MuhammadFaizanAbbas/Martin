@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT_DIR = process.cwd();
-const API_DIR = path.join(ROOT_DIR, "api");
+const API_ENTRY = path.join(ROOT_DIR, "api", "index.js");
 const PORT = Number(process.env.PORT || 3001);
 
 const MIME_TYPES = {
@@ -106,17 +106,8 @@ async function handleApiRequest(req, res, url) {
     return;
   }
 
-  const relativeApiPath = url.pathname.replace(/^\/+/, "");
-  const handlerPath = path.resolve(ROOT_DIR, `${relativeApiPath}.js`);
-
-  if (!handlerPath.startsWith(API_DIR + path.sep)) {
-    res.statusCode = 403;
-    res.end("Forbidden");
-    return;
-  }
-
   try {
-    await fs.access(handlerPath);
+    await fs.access(API_ENTRY);
   } catch {
     res.statusCode = 404;
     res.end("API route not found");
@@ -124,7 +115,7 @@ async function handleApiRequest(req, res, url) {
   }
 
   try {
-    const mod = await import(`${pathToFileURL(handlerPath).href}?t=${Date.now()}`);
+    const mod = await import(`${pathToFileURL(API_ENTRY).href}?t=${Date.now()}`);
     const handler = mod.default;
 
     if (typeof handler !== "function") {
