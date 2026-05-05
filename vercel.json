@@ -4,17 +4,14 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "version": 2,
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api/index.js?path=$1"
+      "source": "/api/:path*",
+      "destination": "/api/index.js?path=:path*"
     },
     {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/:path*",
+      "destination": "/index.html"
     }
   ]
 }
