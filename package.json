@@ -6,6 +6,7 @@
     "node": "20.x"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
     "dev": "node server.mjs",
     "start": "node server.mjs"
   }
