@@ -3,19 +3,11 @@
   "framework": null,
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": {
-    "api/index.js": {
-      "runtime": "nodejs20.x"
-    }
-  },
   "version": 2,
   "routes": [
     {
       "src": "/api/(.*)",
       "dest": "/api/index.js?path=$1"
-    },
-    {
-      "handle": "filesystem"
     },
     {
       "src": "/(.*)",
